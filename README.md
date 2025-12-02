@@ -5,7 +5,7 @@
 
 A Go-native MCP (Model Context Protocol) server for SAP ABAP Development Tools (ADT).
 
-Single-binary distribution of 36 ADT tools for use with Claude and other MCP-compatible AI assistants.
+Single-binary distribution of 41 ADT tools for use with Claude and other MCP-compatible AI assistants.
 
 ## Why This Project?
 
@@ -72,6 +72,10 @@ Comparison of ADT capabilities across implementations:
 | Write & Activate | - | - | **Y** |
 | Create & Activate | - | - | **Y** |
 | Create with Tests | - | - | **Y** |
+| **File-Based Deployment** |
+| Deploy from File | - | - | **Y** |
+| Save to File | - | - | **Y** |
+| Rename Objects | - | - | **Y** |
 | **Transports** |
 | Transport Management | Y | Y | N |
 | **ATC** |
@@ -81,7 +85,7 @@ Comparison of ADT capabilities across implementations:
 
 **Legend:** Y = Full support, P = Partial, N = Not implemented, - = Not applicable
 
-## Available Tools (36)
+## Available Tools (41)
 
 ### Read Operations (14 tools)
 
@@ -140,6 +144,33 @@ Workflow tools are **composite/multi-step operations** that combine multiple ADT
 | `CreateClassWithTests` | Create class with unit tests and run them | Create → Lock → UpdateSource → CreateTestInclude → WriteTests → Unlock → Activate → RunUnitTests |
 
 These tools significantly simplify AI-assisted development by handling locking, error checking, and activation automatically.
+
+### File-Based Deployment Tools (5 tools)
+
+**Solves token limit problem** for large generated files (like ML models, complex classes). These tools read/write ABAP source files directly from the filesystem, bypassing Claude's token limits:
+
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| `DeployFromFile` | **Recommended** - Smart deploy: auto-detects if create or update is needed | Deploy any ABAP file (class, program, interface) |
+| `CreateFromFile` | Create new object from file with full workflow | First-time deployment of new objects |
+| `UpdateFromFile` | Update existing object from file with full workflow | Update existing objects from files |
+| `SaveToFile` | Save ABAP object source to local file (SAP → File) | Export objects for version control |
+| `RenameObject` | Rename object by creating copy with new name | Fix naming conventions, refactor |
+
+**Workflow executed:** Parse file → Detect type/name → Lock → Syntax check → Write → Unlock → Activate
+
+**Supported file extensions:**
+- `.clas.abap` - Classes
+- `.prog.abap` - Programs
+- `.intf.abap` - Interfaces
+- `.fugr.abap` - Function Groups
+- `.func.abap` - Function Modules
+
+**Example:** Deploy a 3,948-line generated ML class without token limits:
+```bash
+# Claude calls:
+DeployFromFile(file_path="/path/to/zcl_ml_iris.clas.abap", package_name="$ZAML_IRIS")
+```
 
 ### Code Intelligence Tools (7 tools)
 
@@ -329,9 +360,10 @@ vibing-steamer/
 │   ├── devtools.go          # Development tools (syntax check, activate, tests)
 │   ├── codeintel.go         # Code intelligence (definition, refs, completion)
 │   ├── workflows.go         # High-level composite operations
+│   ├── fileparser.go        # ABAP file parser (detect type/name from files)
 │   └── xml.go               # XML types and parsing
 ├── internal/mcp/            # MCP server implementation
-│   └── server.go            # Tool registration and handlers (36 tools)
+│   └── server.go            # Tool registration and handlers (41 tools)
 ├── reports/                 # Project documentation and research
 └── build/                   # Cross-platform binaries
 ```
@@ -342,8 +374,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
 
 | Metric | Value |
 |--------|-------|
-| **Tools** | 36 |
-| **Unit Tests** | 84 |
+| **Tools** | 41 |
+| **Unit Tests** | 91 (7 new file parser tests) |
 | **Integration Tests** | 20+ |
 | **Platforms** | 9 (Linux, macOS, Windows × amd64/arm64/386) |
 
