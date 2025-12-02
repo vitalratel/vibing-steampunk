@@ -25,7 +25,7 @@ This project stands on the shoulders of giants:
 | Project | Author | Description |
 |---------|--------|-------------|
 | [abap-adt-api](https://github.com/marcellourbani/abap-adt-api) | Marcello Urbani | TypeScript library that implements the ADT REST API. Powers the [ABAP Remote FS](https://github.com/marcellourbani/vscode_abap_remote_fs) VS Code extension. The definitive reference for ADT API implementation. |
-| [mcp-abap-adt](https://github.com/mario-andrle/mcp-abap-adt) | Mario Andrle | First MCP server for ABAP ADT in TypeScript/Node.js. Pioneered the concept of AI-assisted ABAP development via MCP. |
+| [mcp-abap-adt](https://github.com/mario-andreschak/mcp-abap-adt) | Mario Andreschak | First MCP server for ABAP ADT in TypeScript/Node.js. Pioneered the concept of AI-assisted ABAP development via MCP. |
 
 **mcp-adt-go** is a complete rewrite in Go, providing:
 - Single binary with zero runtime dependencies
