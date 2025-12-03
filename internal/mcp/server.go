@@ -540,6 +540,46 @@ func (s *Server) registerTools() {
 		),
 	), s.handleDeployFromFile)
 
+	// SaveToFile
+	s.mcpServer.AddTool(mcp.NewTool("SaveToFile",
+		mcp.WithDescription("Save ABAP object source to local file (SAP → File). Enables bidirectional sync: download objects for editing/version control, then re-deploy with DeployFromFile. Auto-determines file extension based on object type."),
+		mcp.WithString("objType",
+			mcp.Required(),
+			mcp.Description("Object type: CLAS/OC (class), PROG/P (program), INTF/OI (interface), FUGR/F (function group), FUGR/FF (function module)"),
+		),
+		mcp.WithString("objectName",
+			mcp.Required(),
+			mcp.Description("Object name (e.g., ZCL_ML_IRIS, ZAML_IRIS_DEMO)"),
+		),
+		mcp.WithString("outputPath",
+			mcp.Description("Output file path or directory. If directory, filename is auto-generated with correct extension. If omitted, saves to current directory."),
+		),
+	), s.handleSaveToFile)
+
+	// RenameObject
+	s.mcpServer.AddTool(mcp.NewTool("RenameObject",
+		mcp.WithDescription("Rename ABAP object by creating copy with new name and deleting old one. Useful for fixing naming conventions. Workflow: GetSource → Replace names → CreateNew → ActivateNew → DeleteOld"),
+		mcp.WithString("objType",
+			mcp.Required(),
+			mcp.Description("Object type: CLAS/OC (class), PROG/P (program), INTF/OI (interface), FUGR/F (function group)"),
+		),
+		mcp.WithString("oldName",
+			mcp.Required(),
+			mcp.Description("Current object name"),
+		),
+		mcp.WithString("newName",
+			mcp.Required(),
+			mcp.Description("New object name"),
+		),
+		mcp.WithString("packageName",
+			mcp.Required(),
+			mcp.Description("Package name for new object (e.g., $ZAML_IRIS)"),
+		),
+		mcp.WithString("transport",
+			mcp.Description("Transport request number (optional for local packages)"),
+		),
+	), s.handleRenameObject)
+
 	// --- Code Intelligence Tools ---
 
 	// FindDefinition
@@ -1350,6 +1390,72 @@ func (s *Server) handleDeployFromFile(ctx context.Context, request mcp.CallToolR
 	result, err := s.adtClient.DeployFromFile(ctx, filePath, packageName, transport)
 	if err != nil {
 		return newToolResultError(fmt.Sprintf("DeployFromFile failed: %v", err)), nil
+	}
+
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(output)), nil
+}
+
+func (s *Server) handleSaveToFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	objTypeStr, ok := request.Params.Arguments["objType"].(string)
+	if !ok || objTypeStr == "" {
+		return newToolResultError("objType is required (e.g., CLAS/OC, PROG/P, INTF/OI, FUGR/F, FUGR/FF)"), nil
+	}
+
+	objectName, ok := request.Params.Arguments["objectName"].(string)
+	if !ok || objectName == "" {
+		return newToolResultError("objectName is required"), nil
+	}
+
+	outputPath := ""
+	if p, ok := request.Params.Arguments["outputPath"].(string); ok {
+		outputPath = p
+	}
+
+	// Parse object type
+	objType := adt.CreatableObjectType(objTypeStr)
+
+	result, err := s.adtClient.SaveToFile(ctx, objType, objectName, outputPath)
+	if err != nil {
+		return newToolResultError(fmt.Sprintf("SaveToFile failed: %v", err)), nil
+	}
+
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(output)), nil
+}
+
+func (s *Server) handleRenameObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	objTypeStr, ok := request.Params.Arguments["objType"].(string)
+	if !ok || objTypeStr == "" {
+		return newToolResultError("objType is required (e.g., CLAS/OC, PROG/P, INTF/OI, FUGR/F)"), nil
+	}
+
+	oldName, ok := request.Params.Arguments["oldName"].(string)
+	if !ok || oldName == "" {
+		return newToolResultError("oldName is required"), nil
+	}
+
+	newName, ok := request.Params.Arguments["newName"].(string)
+	if !ok || newName == "" {
+		return newToolResultError("newName is required"), nil
+	}
+
+	packageName, ok := request.Params.Arguments["packageName"].(string)
+	if !ok || packageName == "" {
+		return newToolResultError("packageName is required"), nil
+	}
+
+	transport := ""
+	if t, ok := request.Params.Arguments["transport"].(string); ok {
+		transport = t
+	}
+
+	// Parse object type
+	objType := adt.CreatableObjectType(objTypeStr)
+
+	result, err := s.adtClient.RenameObject(ctx, objType, oldName, newName, packageName, transport)
+	if err != nil {
+		return newToolResultError(fmt.Sprintf("RenameObject failed: %v", err)), nil
 	}
 
 	output, _ := json.MarshalIndent(result, "", "  ")
