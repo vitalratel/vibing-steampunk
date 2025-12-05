@@ -329,26 +329,20 @@ func (m *AMDPSessionManager) fetchCSRFToken(ctx context.Context, user, password 
 }
 
 // initiateSession starts an AMDP debug session on the server
+// Uses correct ADT endpoint: /sap/bc/adt/amdp/debugger/main
 func (m *AMDPSessionManager) initiateSession(ctx context.Context, objectURI, user, password string) error {
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions?sap-client=%s", m.baseURL, m.client)
+	// Correct endpoint from ADT discovery
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main?sap-client=%s&stopExisting=true&requestUser=%s&cascadeMode=FULL",
+		m.baseURL, m.client, strings.ToUpper(user))
 
-	// Build session start XML
-	body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<amdp:startConfiguration xmlns:amdp="http://www.sap.com/adt/debugger/amdp">
-  <amdp:objectUri>%s</amdp:objectUri>
-  <amdp:user>%s</amdp:user>
-  <amdp:terminateExisting>true</amdp:terminateExisting>
-</amdp:startConfiguration>`, objectURI, user)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", u, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", u, nil)
 	if err != nil {
 		return err
 	}
 
 	req.SetBasicAuth(user, password)
 	req.Header.Set("X-CSRF-Token", m.csrfToken)
-	req.Header.Set("Content-Type", "application/vnd.sap.adt.debugger.amdp.startconfiguration.v1+xml")
-	req.Header.Set("Accept", "application/vnd.sap.adt.debugger.amdp.session.v1+xml")
+	req.Header.Set("Accept", "application/vnd.sap.adt.amdp.dbg.startmain.v1+xml")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -361,26 +355,39 @@ func (m *AMDPSessionManager) initiateSession(ctx context.Context, objectURI, use
 		return fmt.Errorf("failed to start session: %d - %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Parse response to get session and main IDs
+	// Parse response - returns <startParameters> with HANA_SESSION_ID
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
 
-	// Parse the session response
-	var sessionResp struct {
-		XMLName   xml.Name `xml:"session"`
-		SessionID string   `xml:"sessionId"`
-		MainID    string   `xml:"mainId"`
+	// Parse the startParameters response
+	var startParams struct {
+		XMLName    xml.Name `xml:"startParameters"`
+		Parameters []struct {
+			Key   string `xml:"key,attr"`
+			Value string `xml:"value,attr"`
+		} `xml:"parameter"`
 	}
-	if err := xml.Unmarshal(bodyBytes, &sessionResp); err != nil {
-		// Try to extract from response anyway
+	if err := xml.Unmarshal(bodyBytes, &startParams); err != nil {
 		return fmt.Errorf("session started but failed to parse response: %s", string(bodyBytes))
 	}
 
+	// Extract HANA_SESSION_ID as the mainId
+	var mainID string
+	for _, p := range startParams.Parameters {
+		if p.Key == "HANA_SESSION_ID" {
+			mainID = p.Value
+			break
+		}
+	}
+	if mainID == "" {
+		return fmt.Errorf("no HANA_SESSION_ID in response: %s", string(bodyBytes))
+	}
+
 	m.mu.Lock()
-	m.state.SessionID = sessionResp.SessionID
-	m.state.MainID = sessionResp.MainID
+	m.state.SessionID = mainID
+	m.state.MainID = mainID
 	m.state.Status = "running"
 	m.mu.Unlock()
 
@@ -388,6 +395,8 @@ func (m *AMDPSessionManager) initiateSession(ctx context.Context, objectURI, use
 }
 
 // step performs a step operation in the debug session
+// Note: AMDP debugger step requires a debuggeeId, not just mainId
+// For now we do a resume/wait which returns on_break or on_execution_end
 func (m *AMDPSessionManager) step(ctx context.Context, stepType string) (map[string]interface{}, error) {
 	m.mu.RLock()
 	mainID := m.state.MainID
@@ -397,22 +406,17 @@ func (m *AMDPSessionManager) step(ctx context.Context, stepType string) (map[str
 		return nil, fmt.Errorf("no active session")
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s?sap-client=%s",
+	// AMDP debugger uses GET on /main/{mainId} to resume and wait for events
+	// The step operations require debuggeeId which we get from on_break events
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main/%s?sap-client=%s&timeout=60",
 		m.baseURL, url.PathEscape(mainID), m.client)
 
-	body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<amdp:stepConfiguration xmlns:amdp="http://www.sap.com/adt/debugger/amdp">
-  <amdp:stepType>%s</amdp:stepType>
-</amdp:stepConfiguration>`, stepType)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", u, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("X-CSRF-Token", m.csrfToken)
-	req.Header.Set("Content-Type", "application/vnd.sap.adt.debugger.amdp.stepconfiguration.v1+xml")
-	req.Header.Set("Accept", "application/vnd.sap.adt.debugger.amdp.stepresult.v1+xml")
+	req.Header.Set("Accept", "application/vnd.sap.adt.amdp.dbg.main.v4+xml")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -426,7 +430,7 @@ func (m *AMDPSessionManager) step(ctx context.Context, stepType string) (map[str
 		return nil, fmt.Errorf("step failed: %d - %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Parse step result
+	// Parse response
 	result := map[string]interface{}{
 		"stepType": stepType,
 		"response": string(bodyBytes),
@@ -439,42 +443,19 @@ func (m *AMDPSessionManager) step(ctx context.Context, stepType string) (map[str
 func (m *AMDPSessionManager) getStatus(ctx context.Context) (*AMDPSessionState, error) {
 	m.mu.RLock()
 	mainID := m.state.MainID
+	state := m.state
 	m.mu.RUnlock()
 
 	if mainID == "" {
 		return nil, fmt.Errorf("no active session")
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s?sap-client=%s",
-		m.baseURL, url.PathEscape(mainID), m.client)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/vnd.sap.adt.debugger.amdp.session.v1+xml")
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("get status failed: %d - %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Return current state
-	m.mu.RLock()
-	state := m.state
-	m.mu.RUnlock()
-
+	// Return current local state (we don't poll the server here to avoid blocking)
 	return &state, nil
 }
 
 // getVariables retrieves variable values from the debug session
+// Note: Requires debuggeeId from an on_break event to get variables
 func (m *AMDPSessionManager) getVariables(ctx context.Context) ([]map[string]interface{}, error) {
 	m.mu.RLock()
 	mainID := m.state.MainID
@@ -484,31 +465,11 @@ func (m *AMDPSessionManager) getVariables(ctx context.Context) ([]map[string]int
 		return nil, fmt.Errorf("no active session")
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s/variables?sap-client=%s",
-		m.baseURL, url.PathEscape(mainID), m.client)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/vnd.sap.adt.debugger.amdp.variables.v1+xml")
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get variables failed: %d - %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Return raw response for now
+	// Variables require /main/{mainId}/debuggees/{debuggeeId}/variables/{varname}
+	// We need a debuggeeId from an on_break event first
+	// For now return session status
 	return []map[string]interface{}{
-		{"response": string(bodyBytes)},
+		{"status": "variables require debuggeeId from breakpoint event", "mainId": mainID},
 	}, nil
 }
 
@@ -522,7 +483,8 @@ func (m *AMDPSessionManager) getBreakpoints(ctx context.Context) ([]map[string]i
 		return nil, fmt.Errorf("no active session")
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s/breakpoints?sap-client=%s",
+	// Correct endpoint: /sap/bc/adt/amdp/debugger/main/{mainId}/breakpoints
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main/%s/breakpoints?sap-client=%s",
 		m.baseURL, url.PathEscape(mainID), m.client)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -530,7 +492,7 @@ func (m *AMDPSessionManager) getBreakpoints(ctx context.Context) ([]map[string]i
 		return nil, err
 	}
 
-	req.Header.Set("Accept", "application/vnd.sap.adt.debugger.amdp.breakpoints.v1+xml")
+	req.Header.Set("Accept", "application/xml")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -559,14 +521,15 @@ func (m *AMDPSessionManager) setBreakpoint(ctx context.Context, procName string,
 		return fmt.Errorf("no active session")
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s/breakpoints?sap-client=%s",
+	// Correct endpoint: /sap/bc/adt/amdp/debugger/main/{mainId}/breakpoints
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main/%s/breakpoints?sap-client=%s",
 		m.baseURL, url.PathEscape(mainID), m.client)
 
+	// Build breakpoint XML
 	body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<amdp:breakpoint xmlns:amdp="http://www.sap.com/adt/debugger/amdp">
-  <amdp:procName>%s</amdp:procName>
-  <amdp:line>%d</amdp:line>
-</amdp:breakpoint>`, procName, line)
+<breakpoints xmlns="http://www.sap.com/adt/amdp/debugger">
+  <breakpoint procName="%s" line="%d"/>
+</breakpoints>`, procName, line)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", u, strings.NewReader(body))
 	if err != nil {
@@ -574,7 +537,7 @@ func (m *AMDPSessionManager) setBreakpoint(ctx context.Context, procName string,
 	}
 
 	req.Header.Set("X-CSRF-Token", m.csrfToken)
-	req.Header.Set("Content-Type", "application/vnd.sap.adt.debugger.amdp.breakpoint.v1+xml")
+	req.Header.Set("Content-Type", "application/xml")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -600,7 +563,8 @@ func (m *AMDPSessionManager) stopSession(ctx context.Context) error {
 		return nil // Already stopped
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s?sap-client=%s",
+	// Correct endpoint: DELETE /sap/bc/adt/amdp/debugger/main/{mainId}?hardStop=true
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main/%s?sap-client=%s&hardStop=true",
 		m.baseURL, url.PathEscape(mainID), m.client)
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", u, nil)
@@ -632,7 +596,8 @@ func (m *AMDPSessionManager) hardStop(ctx context.Context) {
 		return
 	}
 
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s?sap-client=%s&hard_stop=true",
+	// Correct endpoint: DELETE /sap/bc/adt/amdp/debugger/main/{mainId}?hardStop=true
+	u := fmt.Sprintf("%s/sap/bc/adt/amdp/debugger/main/%s?sap-client=%s&hardStop=true",
 		m.baseURL, url.PathEscape(mainID), m.client)
 
 	req, _ := http.NewRequestWithContext(ctx, "DELETE", u, nil)
@@ -652,11 +617,11 @@ func (m *AMDPSessionManager) sendKeepalive(ctx context.Context) {
 		return
 	}
 
-	// Simple GET request to keep session alive
-	u := fmt.Sprintf("%s/sap/bc/adt/runtime/debugger/amdp/sessions/%s?sap-client=%s",
-		m.baseURL, url.PathEscape(mainID), m.client)
+	// Simple GET to discovery endpoint to keep session alive
+	// Using discovery instead of main/{id} to avoid blocking long-poll
+	u := fmt.Sprintf("%s/sap/bc/adt/discovery?sap-client=%s", m.baseURL, m.client)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", u, nil)
 	if err != nil {
 		return
 	}
