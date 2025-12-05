@@ -490,26 +490,29 @@ func (c *Client) DeleteObject(ctx context.Context, objectURL string, lockHandle 
 // --- Helper to get object URLs ---
 
 // GetObjectURL returns the ADT URL for an object based on its type and name.
+// All names are URL-encoded to support namespaced objects like /UI5/CL_REPOSITORY_LOAD.
 func GetObjectURL(objectType CreatableObjectType, name string, parentName string) string {
 	name = strings.ToUpper(name)
+	encodedName := url.PathEscape(name)
 
 	switch objectType {
 	case ObjectTypeProgram:
-		return fmt.Sprintf("/sap/bc/adt/programs/programs/%s", name)
+		return fmt.Sprintf("/sap/bc/adt/programs/programs/%s", encodedName)
 	case ObjectTypeInclude:
-		return fmt.Sprintf("/sap/bc/adt/programs/includes/%s", name)
+		return fmt.Sprintf("/sap/bc/adt/programs/includes/%s", encodedName)
 	case ObjectTypeClass:
-		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s", name)
+		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s", encodedName)
 	case ObjectTypeInterface:
-		return fmt.Sprintf("/sap/bc/adt/oo/interfaces/%s", name)
+		return fmt.Sprintf("/sap/bc/adt/oo/interfaces/%s", encodedName)
 	case ObjectTypeFunctionGroup:
-		return fmt.Sprintf("/sap/bc/adt/functions/groups/%s", name)
+		return fmt.Sprintf("/sap/bc/adt/functions/groups/%s", encodedName)
 	case ObjectTypeFunctionMod:
 		parentName = strings.ToUpper(parentName)
-		return fmt.Sprintf("/sap/bc/adt/functions/groups/%s/fmodules/%s", parentName, name)
+		encodedParent := url.PathEscape(parentName)
+		return fmt.Sprintf("/sap/bc/adt/functions/groups/%s/fmodules/%s", encodedParent, encodedName)
 	case ObjectTypePackage:
-		return fmt.Sprintf("/sap/bc/adt/packages/%s", name)
-	// RAP object types - use URL encoding for namespaced objects
+		return fmt.Sprintf("/sap/bc/adt/packages/%s", encodedName)
+	// RAP object types - use lowercase for CDS objects
 	case ObjectTypeDDLS:
 		return fmt.Sprintf("/sap/bc/adt/ddic/ddl/sources/%s", url.PathEscape(strings.ToLower(name)))
 	case ObjectTypeBDEF:
@@ -546,29 +549,34 @@ const (
 )
 
 // GetClassIncludeURL returns the URL for a class include.
+// Supports namespaced classes like /UI5/CL_REPOSITORY_LOAD.
 func GetClassIncludeURL(className string, includeType ClassIncludeType) string {
 	className = strings.ToUpper(className)
+	encodedName := url.PathEscape(className)
 	if includeType == ClassIncludeMain {
-		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", className)
+		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", encodedName)
 	}
-	return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes/%s", className, includeType)
+	return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes/%s", encodedName, includeType)
 }
 
 // GetClassIncludeSourceURL returns the source URL for a class include.
 // Note: For includes other than main, the URL does NOT have /source/main suffix
+// Supports namespaced classes like /UI5/CL_REPOSITORY_LOAD.
 func GetClassIncludeSourceURL(className string, includeType ClassIncludeType) string {
 	className = strings.ToUpper(className)
+	encodedName := url.PathEscape(className)
 	if includeType == ClassIncludeMain {
-		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", className)
+		return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", encodedName)
 	}
 	// For other includes (definitions, implementations, macros, testclasses),
 	// the source is accessed directly at the include URL without /source/main
-	return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes/%s", className, includeType)
+	return fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes/%s", encodedName, includeType)
 }
 
 // CreateTestInclude creates the test classes include for a class.
 // This must be called before you can write test class code.
 // Requires a lock on the parent class.
+// Supports namespaced classes.
 func (c *Client) CreateTestInclude(ctx context.Context, className string, lockHandle string, transport string) error {
 	className = strings.ToUpper(className)
 
@@ -583,7 +591,8 @@ func (c *Client) CreateTestInclude(ctx context.Context, className string, lockHa
 		params.Set("corrNr", transport)
 	}
 
-	includesURL := fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes", className)
+	// URL encode for namespaced objects
+	includesURL := fmt.Sprintf("/sap/bc/adt/oo/classes/%s/includes", url.PathEscape(className))
 	_, err := c.transport.Request(ctx, includesURL, &RequestOptions{
 		Method:      http.MethodPost,
 		Query:       params,

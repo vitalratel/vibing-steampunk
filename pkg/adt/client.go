@@ -72,11 +72,12 @@ func (c *Client) SearchObject(ctx context.Context, query string, maxResults int)
 // --- Program Operations ---
 
 // GetProgram retrieves the source code of an ABAP program.
+// Supports namespaced programs like /UI5/UI5_REPOSITORY_LOAD.
 func (c *Client) GetProgram(ctx context.Context, programName string) (string, error) {
 	programName = strings.ToUpper(programName)
 
-	// Go directly to source/main endpoint
-	sourcePath := fmt.Sprintf("/sap/bc/adt/programs/programs/%s/source/main", programName)
+	// Go directly to source/main endpoint (URL encode for namespaced objects)
+	sourcePath := fmt.Sprintf("/sap/bc/adt/programs/programs/%s/source/main", url.PathEscape(programName))
 	resp, err := c.transport.Request(ctx, sourcePath, &RequestOptions{
 		Method: http.MethodGet,
 	})
@@ -91,11 +92,12 @@ func (c *Client) GetProgram(ctx context.Context, programName string) (string, er
 
 // GetClass retrieves the source code of an ABAP class.
 // It returns a map of include names to source code.
+// Supports namespaced classes like /UI5/CL_REPOSITORY_LOAD.
 func (c *Client) GetClass(ctx context.Context, className string) (map[string]string, error) {
 	className = strings.ToUpper(className)
 
-	// Go directly to source/main endpoint
-	sourcePath := fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", className)
+	// Go directly to source/main endpoint (URL encode for namespaced objects)
+	sourcePath := fmt.Sprintf("/sap/bc/adt/oo/classes/%s/source/main", url.PathEscape(className))
 	resp, err := c.transport.Request(ctx, sourcePath, &RequestOptions{
 		Method: http.MethodGet,
 	})
@@ -121,11 +123,12 @@ func (c *Client) GetClassSource(ctx context.Context, className string) (string, 
 // --- Interface Operations ---
 
 // GetInterface retrieves the source code of an ABAP interface.
+// Supports namespaced interfaces like /UI5/IF_REPOSITORY_LOAD_ADPTER.
 func (c *Client) GetInterface(ctx context.Context, interfaceName string) (string, error) {
 	interfaceName = strings.ToUpper(interfaceName)
 
-	// Go directly to source/main endpoint
-	sourcePath := fmt.Sprintf("/sap/bc/adt/oo/interfaces/%s/source/main", interfaceName)
+	// Go directly to source/main endpoint (URL encode for namespaced objects)
+	sourcePath := fmt.Sprintf("/sap/bc/adt/oo/interfaces/%s/source/main", url.PathEscape(interfaceName))
 	resp, err := c.transport.Request(ctx, sourcePath, &RequestOptions{
 		Method: http.MethodGet,
 	})
@@ -139,10 +142,12 @@ func (c *Client) GetInterface(ctx context.Context, interfaceName string) (string
 // --- Function Module Operations ---
 
 // GetFunctionGroup retrieves the structure of a function group.
+// Supports namespaced function groups like /UI5/UI5_REPOSITORY_LOAD.
 func (c *Client) GetFunctionGroup(ctx context.Context, groupName string) (*FunctionGroup, error) {
 	groupName = strings.ToUpper(groupName)
 
-	structPath := fmt.Sprintf("/sap/bc/adt/functions/groups/%s", groupName)
+	// URL encode for namespaced objects
+	structPath := fmt.Sprintf("/sap/bc/adt/functions/groups/%s", url.PathEscape(groupName))
 	resp, err := c.transport.Request(ctx, structPath, &RequestOptions{
 		Method: http.MethodGet,
 		Accept: "application/xml",
@@ -160,12 +165,14 @@ func (c *Client) GetFunctionGroup(ctx context.Context, groupName string) (*Funct
 }
 
 // GetFunction retrieves the source code of a function module.
+// Supports namespaced function modules like /UI5/UI5_REPOSITORY_LOAD_HTTP.
 func (c *Client) GetFunction(ctx context.Context, functionName, groupName string) (string, error) {
 	functionName = strings.ToUpper(functionName)
 	groupName = strings.ToUpper(groupName)
 
+	// URL encode for namespaced objects
 	sourcePath := fmt.Sprintf("/sap/bc/adt/functions/groups/%s/fmodules/%s/source/main",
-		groupName, functionName)
+		url.PathEscape(groupName), url.PathEscape(functionName))
 
 	resp, err := c.transport.Request(ctx, sourcePath, &RequestOptions{
 		Method: http.MethodGet,
@@ -181,10 +188,12 @@ func (c *Client) GetFunction(ctx context.Context, functionName, groupName string
 // --- Include Operations ---
 
 // GetInclude retrieves the source code of an ABAP include.
+// Supports namespaced includes.
 func (c *Client) GetInclude(ctx context.Context, includeName string) (string, error) {
 	includeName = strings.ToUpper(includeName)
 
-	sourcePath := fmt.Sprintf("/sap/bc/adt/programs/includes/%s/source/main", includeName)
+	// URL encode for namespaced objects
+	sourcePath := fmt.Sprintf("/sap/bc/adt/programs/includes/%s/source/main", url.PathEscape(includeName))
 	resp, err := c.transport.Request(ctx, sourcePath, &RequestOptions{
 		Method: http.MethodGet,
 		Accept: "text/plain",
@@ -348,10 +357,12 @@ type MessageClass struct {
 }
 
 // GetMessageClass retrieves all messages from an ABAP message class.
+// Supports namespaced message classes.
 func (c *Client) GetMessageClass(ctx context.Context, msgClassName string) (*MessageClass, error) {
 	msgClassName = strings.ToUpper(msgClassName)
 
-	path := fmt.Sprintf("/sap/bc/adt/messageclass/%s", strings.ToLower(msgClassName))
+	// URL encode for namespaced objects
+	path := fmt.Sprintf("/sap/bc/adt/messageclass/%s", url.PathEscape(strings.ToLower(msgClassName)))
 	resp, err := c.transport.Request(ctx, path, &RequestOptions{
 		Method: http.MethodGet,
 		Accept: "application/xml",
