@@ -1,216 +1,603 @@
-# ZADT-VSP APC Handler
+# Embedded ABAP Objects
 
-Unified WebSocket handler for vsp MCP server - enables stateful operations not available via standard ADT REST APIs.
+This directory contains optional ABAP objects that can be deployed to SAP systems for enhanced vsp functionality.
 
-## Status
+---
 
-**EXPERIMENTAL / DEPLOYED** - This is optional custom ABAP code that breaks the "vanilla ADT" approach.
+## WebSocket Handler (ZADT_VSP) v2.0.0
 
-Objects deployed to SAP system:
-- `$ZADT_VSP` - Package ✅
-- `ZIF_VSP_SERVICE` - Interface ✅
-- `ZCL_VSP_RFC_SERVICE` - Class ✅
-- `ZCL_VSP_APC_HANDLER` - Class ✅
+> **CRITICAL FOR AI-POWERED ROOT CAUSE ANALYSIS (RCA)**
+>
+> This WebSocket handler is the **cornerstone of programmatic ABAP debugging**. Without it, AI agents
+> cannot step through code, inspect variables, or perform automated RCA. The standard ADT REST APIs
+> do not provide stateful debug sessions - only this WebSocket/TPDAPI integration enables true
+> AI-driven debugging capabilities.
 
-## Objects
+The WebSocket handler enables **stateful operations** not available through standard ADT REST APIs:
 
-| Object | Type | Description |
-|--------|------|-------------|
-| `$ZADT_VSP` | Package | Container package (local, no transport) |
-| `ZIF_VSP_SERVICE` | Interface | Service interface for domains |
-| `ZCL_VSP_APC_HANDLER` | Class | Main APC WebSocket handler |
-| `ZCL_VSP_RFC_SERVICE` | Class | RFC domain - dynamic RFC/BAPI calls |
+- **RFC/BAPI execution** with full parameter support
+- **Real-time debugging** with step-into, step-over, step-return, continue
+- **Call stack inspection** during debug sessions
+- **Variable inspection** at breakpoints
 
-## Installation
+### Why WebSocket?
 
-### 1. Create Package
+| HTTP REST | WebSocket |
+|-----------|-----------|
+| Stateless | Stateful session |
+| Cannot maintain debug context | Persistent debug session |
+| Timeout issues with blocking ops | Native long-polling |
+| No TPDAPI access | Full debugger integration |
 
-```
-Transaction: SE80 or ADT
-Package: $ZADT_VSP
-Description: VSP APC Handler for MCP Server
-```
+### Objects
 
-### 2. Create Interface
+| File | Object | Description |
+|------|--------|-------------|
+| `zif_vsp_service.intf.abap` | Interface | Service contract for domain handlers |
+| `zcl_vsp_rfc_service.clas.abap` | Class | RFC domain - function module calls |
+| `zcl_vsp_debug_service.clas.abap` | Class | Debug domain - TPDAPI integration |
+| `zcl_vsp_apc_handler.clas.abap` | Class | Main APC WebSocket handler |
 
-Create `ZIF_VSP_SERVICE` from `zif_vsp_service.intf.abap`
+### Deployment
 
-### 3. Create Classes
-
-Create in order:
-1. `ZCL_VSP_RFC_SERVICE` from `zcl_vsp_rfc_service.clas.abap`
-2. `ZCL_VSP_APC_HANDLER` from `zcl_vsp_apc_handler.clas.abap`
-
-### 4. Create APC Application
-
-```
-Transaction: SAPC
-Application ID: ZADT_VSP
-Description: VSP MCP Server WebSocket Handler
-Handler Class: ZCL_VSP_APC_HANDLER
-Connection Type: WebSocket (stateful)
-```
-
-### 5. Activate ICF Service
-
-```
-Transaction: SICF
-Path: /sap/bc/apc/sap/zadt_vsp
-Right-click → Activate
-```
-
-### 6. Test Connection
+#### Option 1: Using vsp WriteSource
 
 ```bash
-# WebSocket URL format
-wss://<host>:<port>/sap/bc/apc/sap/zadt_vsp?sap-client=<client>
+# Create package first
+vsp CreatePackage --name '$ZADT_VSP' --description 'VSP WebSocket Handler'
 
-# Test with websocat (command line tool)
-websocat "ws://<host>:<port>/sap/bc/apc/sap/zadt_vsp?sap-client=001" \
-  -H "Authorization: Basic <base64_credentials>"
+# Deploy interface
+vsp WriteSource --object_type INTF --name ZIF_VSP_SERVICE \
+    --package '$ZADT_VSP' --source "$(cat embedded/abap/zif_vsp_service.intf.abap)"
+
+# Deploy RFC service
+vsp WriteSource --object_type CLAS --name ZCL_VSP_RFC_SERVICE \
+    --package '$ZADT_VSP' --source "$(cat embedded/abap/zcl_vsp_rfc_service.clas.abap)"
+
+# Deploy debug service
+vsp WriteSource --object_type CLAS --name ZCL_VSP_DEBUG_SERVICE \
+    --package '$ZADT_VSP' --source "$(cat embedded/abap/zcl_vsp_debug_service.clas.abap)"
+
+# Deploy handler
+vsp WriteSource --object_type CLAS --name ZCL_VSP_APC_HANDLER \
+    --package '$ZADT_VSP' --source "$(cat embedded/abap/zcl_vsp_apc_handler.clas.abap)"
 ```
 
-## Protocol
+#### Option 2: Using ImportFromFile
 
-### Message Format
-
-```json
-{
-  "id": "unique-correlation-id",
-  "domain": "rfc",
-  "action": "call",
-  "params": {
-    "function": "BAPI_USER_GET_DETAIL",
-    "imports": {
-      "USERNAME": "DEVELOPER"
-    }
-  }
-}
+```bash
+vsp ImportFromFile --file_path embedded/abap/zif_vsp_service.intf.abap --package_name '$ZADT_VSP'
+vsp ImportFromFile --file_path embedded/abap/zcl_vsp_rfc_service.clas.abap --package_name '$ZADT_VSP'
+vsp ImportFromFile --file_path embedded/abap/zcl_vsp_debug_service.clas.abap --package_name '$ZADT_VSP'
+vsp ImportFromFile --file_path embedded/abap/zcl_vsp_apc_handler.clas.abap --package_name '$ZADT_VSP'
 ```
 
-### Response Format
+### Post-Deployment: Create APC Application
 
-```json
-{
-  "id": "unique-correlation-id",
-  "success": true,
-  "data": {
-    "sy-subrc": 0,
-    "exports": {
-      "ADDRESS": "...",
-      "LOGONDATA": "..."
-    }
-  }
-}
+After deploying the ABAP objects, create the APC application manually:
+
+1. **Transaction SAPC** - Create APC Application:
+   - Application ID: `ZADT_VSP`
+   - Description: `VSP WebSocket Handler`
+   - Handler Class: `ZCL_VSP_APC_HANDLER`
+   - State: Stateful
+
+2. **Transaction SICF** - Activate ICF Service:
+   - Path: `/sap/bc/apc/sap/zadt_vsp`
+   - Activate the node
+
+### Testing
+
+```bash
+# Test connection
+wscat -c "ws://host:port/sap/bc/apc/sap/zadt_vsp?sap-client=001" \
+      -H "Authorization: Basic $(echo -n user:pass | base64)"
+
+# Or use Go test
+go run test/websocket_test.go
 ```
 
-## RFC Domain Actions
+### Verified Working (2025-12-21)
 
-### `call` - Execute RFC/BAPI
+Full end-to-end debugging tested and verified:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| WebSocket Connection | **Working** | Session ID and version returned |
+| Statement Breakpoints | **Working** | e.g., `CONDENSE`, `CALL FUNCTION` |
+| Exception Breakpoints | **Working** | e.g., `CX_SY_ZERODIVIDE` |
+| Listener (TPDAPI) | **Working** | Catches debuggees from external sessions |
+| Attach to Debuggee | **Working** | Returns program, include, line |
+| Get Variables | **Working** | SY-SUBRC, SY-TABIX, SY-UNAME, etc. |
+| Step Over | **Working** | Advances to next line |
+| Continue | **Working** | Runs until next breakpoint |
+| Detach | **Working** | Ends debug session |
+| RFC Domain | **Working** | Function module execution |
+
+**Note:** Line breakpoints require correct program name (e.g., `SAPLZFUGR` for function groups,
+`ZCL_CLASS================CP` for classes). Statement and exception breakpoints work globally.
+
+**Important:** The breakpoints trigger code executed in a *different* SAP session (e.g., HTTP request,
+unit tests), not code within the same WebSocket handler. This is standard SAP external debugger behavior.
+
+---
+
+## RFC Domain (`domain: "rfc"`)
+
+Execute any RFC/BAPI function module with parameters.
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `call` | Execute RFC with parameters |
+| `search` | Search function modules |
+| `getMetadata` | Get function signature |
+
+### Examples
 
 ```json
+// Call RFC_SYSTEM_INFO
 {
   "id": "1",
   "domain": "rfc",
   "action": "call",
   "params": {
-    "function": "RFC_READ_TABLE",
-    "imports": {
-      "QUERY_TABLE": "T000",
-      "ROWCOUNT": "10"
-    }
+    "function": "RFC_SYSTEM_INFO"
   }
 }
-```
 
-### `getMetadata` - Get Function Signature
-
-```json
+// Call BAPI with parameters
 {
   "id": "2",
   "domain": "rfc",
-  "action": "getMetadata",
+  "action": "call",
   "params": {
-    "function": "BAPI_USER_GET_DETAIL"
-  }
-}
-```
-
-Response:
-```json
-{
-  "id": "2",
-  "success": true,
-  "data": {
     "function": "BAPI_USER_GET_DETAIL",
-    "parameters": [
-      {"name": "USERNAME", "kind": "importing", "type": "BAPIXXX", "optional": false},
-      {"name": "ADDRESS", "kind": "exporting", "type": "BAPIADDR3", "optional": true}
-    ]
+    "USERNAME": "DEVELOPER"
   }
 }
 ```
 
-### `search` - Find Functions
+---
+
+## Debug Domain (`domain: "debug"`) - TPDAPI Integration
+
+Full debugging capabilities via SAP's Test and Performance Development API.
+
+### Actions
+
+| Action | Description | Params |
+|--------|-------------|--------|
+| `getStatus` | Get debug session status | - |
+| `listen` | Wait for debuggee (blocking) | `timeout` (sec), `user` |
+| `getDebuggees` | List waiting debuggees | `user` |
+| `attach` | Attach to debuggee | `debuggeeId` |
+| `step` | Step execution | `type`: into/over/return/continue |
+| `getStack` | Get call stack | - |
+| `getVariables` | Get variable values | `scope`: system/locals/all |
+| `detach` | End debug session | - |
+| `setBreakpoint` | Set session breakpoint | `kind`, `uri`, `line`, etc. |
+| `getBreakpoints` | List session breakpoints | - |
+| `deleteBreakpoint` | Remove breakpoint | `breakpointId` |
+
+### Complete Debug Flow Example
+
+```javascript
+// 1. Check debugging is available
+ws.send({"id":"1","domain":"debug","action":"getStatus"})
+// Response: {"debuggingAvailable":true,"attached":false,...}
+
+// 2. Start listener (blocking call - waits for debuggee)
+ws.send({"id":"2","domain":"debug","action":"listen","params":{"timeout":120}})
+
+// ... Meanwhile, trigger execution (e.g., RunUnitTests via MCP) ...
+
+// Response when debuggee caught:
+// {"status":"caught","debuggees":[{"id":"ABC123...","program":"ZCL_MY_CLASS","user":"DEVELOPER"}]}
+
+// 3. Attach to the debuggee
+ws.send({"id":"3","domain":"debug","action":"attach","params":{"debuggeeId":"ABC123..."}})
+// Response: {"attached":true,"program":"ZCL_MY_CLASS","include":"...CCIMP","line":42}
+
+// 4. Step through code
+ws.send({"id":"4","domain":"debug","action":"step","params":{"type":"over"}})
+// Response: {"stepped":"over","program":"ZCL_MY_CLASS","line":43,"procedure":"METHOD_NAME"}
+
+// 5. Check call stack
+ws.send({"id":"5","domain":"debug","action":"getStack"})
+// Response: {"stack":[{"index":0,"program":"ZCL_MY_CLASS","line":43,"active":true},...]
+
+// 6. Inspect variables
+ws.send({"id":"6","domain":"debug","action":"getVariables","params":{"scope":"system"}})
+// Response: {"variables":[{"name":"SY-SUBRC","value":"0"},{"name":"SY-TABIX","value":"5"},...]}
+
+// 7. Continue execution
+ws.send({"id":"7","domain":"debug","action":"step","params":{"type":"continue"}})
+// Response: {"stepped":"continue","ended":true,"message":"Debuggee ended"}
+
+// 8. Detach (cleanup)
+ws.send({"id":"8","domain":"debug","action":"detach"})
+// Response: {"detached":true}
+```
+
+### Root Cause Analysis (RCA) Workflow
+
+Combine WebSocket debugging with MCP tools for powerful RCA:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    RCA Workflow                              │
+│                                                              │
+│  1. GetDumps ──────► Find runtime error in ST22              │
+│         │                                                    │
+│  2. GetDump ───────► Analyze stack trace, find failure point │
+│         │                                                    │
+│  3. GetSource ─────► Read code at failure location           │
+│         │                                                    │
+│  4. SetExternalBreakpoint ──► Set BP before failure          │
+│         │                                                    │
+│  5. RunUnitTests ──► Trigger reproduction                    │
+│         │                                                    │
+│  6. WebSocket ─────► listen → attach → step → inspect        │
+│         │                                                    │
+│  7. Identify ──────► Root cause found, fix code              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example: Debugging a Division by Zero
+
+```bash
+# Step 1: Find the dump
+vsp GetDumps --exception_type CX_SY_ZERODIVIDE --user DEVELOPER
+
+# Step 2: Get details
+vsp GetDump --dump_id "20251219/143052/DEVELOPER"
+# Shows: ZCL_INVOICE_CALC, line 127, method CALCULATE_DISCOUNT
+
+# Step 3: Set breakpoint
+vsp SetExternalBreakpoint --kind line \
+    --object_uri "/sap/bc/adt/oo/classes/zcl_invoice_calc/source/main" \
+    --line 126 --user DEVELOPER
+
+# Step 4: Run unit tests to trigger (in parallel with WebSocket listener)
+vsp RunUnitTests --object_url "/sap/bc/adt/oo/classes/zcl_invoice_calc"
+
+# Step 5: Debug via WebSocket (see flow above)
+# Discover: lv_discount_rate = 0 causing division by zero
+```
+
+### OData/RAP Debugging
+
+Debug RAP behavior implementations by:
+
+1. Set breakpoint in behavior pool class (e.g., `ZCL_BP_I_SALESORDER`)
+2. Start WebSocket listener
+3. Trigger OData call (via test or curl)
+4. Attach and step through the read/create/update/delete implementation
+
+```json
+// Set breakpoint in RAP handler
+vsp SetExternalBreakpoint --kind line \
+    --object_uri "/sap/bc/adt/oo/classes/zcl_bp_i_salesorder/source/main" \
+    --line 45 --user DEVELOPER
+
+// Trigger via curl
+// curl -X GET "http://host:50000/sap/opu/odata4/sap/zapi_salesorder/SalesOrder('1000')"
+
+// WebSocket: listen → attach → step → analyze
+```
+
+---
+
+## Architecture
+
+```
+WebSocket Client (vsp/AI Agent)
+      │
+      ▼
+ZCL_VSP_APC_HANDLER (router)
+      │
+      ├── ZCL_VSP_RFC_SERVICE (domain: "rfc")
+      │         │
+      │         └── CALL FUNCTION (dynamic)
+      │
+      └── ZCL_VSP_DEBUG_SERVICE (domain: "debug")
+                │
+                └── CL_TPDAPI_SERVICE / IF_TPDAPI_SESSION
+                          │
+                          └── SAP Debugger (same as Eclipse ADT)
+```
+
+Each service implements `ZIF_VSP_SERVICE` interface:
+- `get_domain()` - Returns domain name for routing
+- `handle_message()` - Processes action requests
+- `on_disconnect()` - Cleanup when WebSocket closes
+
+---
+
+## Step Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `into` | Step into function/method call | Investigate called code |
+| `over` | Step over, execute call as single step | Skip known-good code |
+| `return` | Run until current function returns | Exit deep call stack |
+| `continue` | Run until next breakpoint or end | Fast forward |
+
+---
+
+## Variable Scopes
+
+| Scope | Variables |
+|-------|-----------|
+| `system` | SY-SUBRC, SY-TABIX, SY-INDEX, SY-DBCNT, SY-UNAME, SY-DATUM, SY-UZEIT, SY-CPROG |
+| `locals` | Local variables in current scope (planned) |
+| `all` | All available variables |
+
+---
+
+## Error Responses
 
 ```json
 {
-  "id": "3",
-  "domain": "rfc",
-  "action": "search",
-  "params": {
-    "pattern": "BAPI_USER*",
-    "maxResults": 20
+  "id": "request-id",
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable description"
   }
 }
 ```
 
-## System Actions
+Common error codes:
+- `UNKNOWN_ACTION` - Invalid action name
+- `INVALID_PARAMS` - Missing required parameters
+- `DEBUG_NOT_AVAILABLE` - System doesn't support debugging
+- `LISTENER_CONFLICT` - Another listener already active
+- `NOT_ATTACHED` - Operation requires attached debuggee
+- `ALREADY_ATTACHED` - Already debugging another process
 
-### `ping` - Health Check
-
-```json
-{
-  "id": "health",
-  "domain": "system",
-  "action": "ping"
-}
-```
-
-Response:
-```json
-{
-  "id": "health",
-  "success": true,
-  "data": {"pong": true, "timestamp": "2025-12-18T143000"}
-}
-```
+---
 
 ## Security
 
-- All RFC calls check `S_RFC` authorization
-- WebSocket inherits ICF authentication
-- Session bound to authenticated user
+- **Authentication**: Uses SAP credentials via HTTP Basic Auth
+- **Authorization**: Respects S_DEBUG authorization object
+- **Session Isolation**: Each WebSocket connection gets isolated debug session
+- **Cleanup**: `on_disconnect` properly releases debugger resources
+- **Timeout**: Max 240 seconds prevents hung sessions
 
-## Troubleshooting
+---
 
-### WebSocket connection fails
+## Why WebSocket Debugging is CRITICAL for RCA
 
-1. Check ICF service is active: `SICF` → `/sap/bc/apc/sap/zadt_vsp`
-2. Check APC application exists: `SAPC` → `ZADT_VSP`
-3. Check handler class is correct: `ZCL_VSP_APC_HANDLER`
+### The Problem with Traditional Debugging
 
-### RFC call returns AUTH_ERROR
+Traditional ABAP debugging requires:
+- Manual SAP GUI interaction
+- Developer sitting at keyboard
+- Cannot be automated or scripted
+- No AI assistance possible
 
-Check user has `S_RFC` authorization for RFC calls.
+### The WebSocket Solution
 
-### Function not found
+With ZADT_VSP + TPDAPI:
+- **Fully programmatic** - No GUI required
+- **AI-driven** - Claude/LLMs can debug autonomously
+- **Scriptable** - Reproducible debug sessions
+- **Remote** - Debug from anywhere via WebSocket
 
-- Function names are case-insensitive (converted to uppercase)
-- Check function exists in `SE37`
+### RCA Workflow: From Dump to Fix
 
-## Future Domains
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    AI-POWERED ROOT CAUSE ANALYSIS                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  PHASE 1: DISCOVERY                                                          │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
+│  │  GetDumps    │───►│   GetDump    │───►│  GetSource   │                   │
+│  │  (ST22)      │    │  (Details)   │    │  (Code)      │                   │
+│  └──────────────┘    └──────────────┘    └──────────────┘                   │
+│         │                   │                   │                            │
+│         ▼                   ▼                   ▼                            │
+│    Find errors         Stack trace         Read failure                      │
+│    by user/date        & variables         location code                     │
+│                                                                              │
+│  PHASE 2: REPRODUCTION                                                       │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
+│  │ setBreakpoint│───►│ RunUnitTests │───►│   listen     │                   │
+│  │  (TPDAPI)    │    │  or SUBMIT   │    │  (TPDAPI)    │                   │
+│  └──────────────┘    └──────────────┘    └──────────────┘                   │
+│         │                   │                   │                            │
+│         ▼                   ▼                   ▼                            │
+│    Set BP before       Trigger the         Catch the                         │
+│    failure point       failing code        debuggee                          │
+│                                                                              │
+│  PHASE 3: INVESTIGATION                                                      │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
+│  │    attach    │───►│    step      │───►│ getVariables │                   │
+│  │              │    │  (over/into) │    │              │                   │
+│  └──────────────┘    └──────────────┘    └──────────────┘                   │
+│         │                   │                   │                            │
+│         ▼                   ▼                   ▼                            │
+│    Attach to           Walk through        Inspect state                     │
+│    stopped proc        execution           at each step                      │
+│                                                                              │
+│  PHASE 4: RESOLUTION                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
+│  │  Identify    │───►│  EditSource  │───►│ RunUnitTests │                   │
+│  │  Root Cause  │    │  (Fix Code)  │    │  (Verify)    │                   │
+│  └──────────────┘    └──────────────┘    └──────────────┘                   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-- `debug` - Stateful debugging sessions
-- `rca` - ANST integration, dump analysis
-- `event` - Real-time subscriptions
+### Example: AI Debugging a Production Issue
+
+```javascript
+// 1. AI finds recent dumps
+const dumps = await mcp.GetDumps({ user: "BATCH_USER", max_results: 5 });
+// Found: CX_SY_ZERODIVIDE in ZCL_INVOICE_CALC
+
+// 2. AI analyzes dump details
+const dump = await mcp.GetDump({ dump_id: dumps[0].id });
+// Stack shows: CALCULATE_DISCOUNT method, line 127
+
+// 3. AI sets breakpoint before failure
+ws.send({ domain: "debug", action: "setBreakpoint", params: {
+  kind: "line", program: "ZCL_INVOICE_CALC================CP", line: 125
+}});
+
+// 4. AI triggers reproduction via unit tests
+mcp.RunUnitTests({ object_url: "/sap/bc/adt/oo/classes/zcl_invoice_calc" });
+
+// 5. AI catches and attaches to debuggee
+ws.send({ domain: "debug", action: "listen", params: { timeout: 60 }});
+// Caught! Attach...
+ws.send({ domain: "debug", action: "attach", params: { debuggeeId: "..." }});
+
+// 6. AI steps and inspects
+ws.send({ domain: "debug", action: "step", params: { type: "over" }});
+ws.send({ domain: "debug", action: "getVariables", params: { scope: "all" }});
+// Found: lv_discount_pct = 0, causing division by zero!
+
+// 7. AI fixes the code
+mcp.EditSource({ ... add IF lv_discount_pct > 0 check ... });
+
+// 8. AI verifies fix
+mcp.RunUnitTests({ ... }); // All tests pass!
+```
+
+---
+
+## Future Roadmap: Smart Debugging & Tracing
+
+### TODO: Extended Execution Triggers
+
+Currently only RFC calls work. Future:
+
+| Trigger Type | ABAP Statement | Use Case |
+|--------------|----------------|----------|
+| `submit` | `SUBMIT program` | Report execution |
+| `callTransaction` | `CALL TRANSACTION` | Transaction debugging |
+| `callScreen` | `CALL SCREEN` | Dynpro flow debugging |
+| `callMethod` | Dynamic method calls | OO debugging |
+| `backgroundJob` | `JOB_SUBMIT` | Batch job debugging |
+
+### TODO: Smart Tracing Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SMART TRACING VISION                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  STEP 1: BUILD STATIC CALL GRAPH                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  GetCallGraph → Analyze CROSS/WBCROSSGT → Build complete graph       │    │
+│  │                                                                      │    │
+│  │  ZCL_ORDER_PROCESSOR                                                 │    │
+│  │    ├── CREATE_ORDER                                                  │    │
+│  │    │     ├── VALIDATE_CUSTOMER ──► ZCL_CUSTOMER=>CHECK_CREDIT        │    │
+│  │    │     ├── CALCULATE_PRICE ───► ZCL_PRICING=>GET_PRICE             │    │
+│  │    │     │                         └── ZCL_DISCOUNT=>APPLY           │    │
+│  │    │     └── SAVE_ORDER ────────► ZCL_PERSISTENCE=>SAVE              │    │
+│  │    └── CANCEL_ORDER                                                  │    │
+│  │          └── REVERSE_POSTING ──► BAPI_ACC_DOCUMENT_REV_POST          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  STEP 2: TRACE ACTUAL EXECUTION (Multiple Variants)                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  Run with different inputs, collect actual call paths:               │    │
+│  │                                                                      │    │
+│  │  Test 1: Normal Order (Customer A, Product X)                        │    │
+│  │    ✓ CREATE_ORDER → VALIDATE_CUSTOMER → CALCULATE_PRICE → SAVE       │    │
+│  │                                                                      │    │
+│  │  Test 2: Discounted Order (Customer B, Promo Code)                   │    │
+│  │    ✓ CREATE_ORDER → VALIDATE → CALCULATE_PRICE → APPLY_DISCOUNT → SAVE│   │
+│  │                                                                      │    │
+│  │  Test 3: Failed Order (Bad Customer)                                 │    │
+│  │    ✗ CREATE_ORDER → VALIDATE_CUSTOMER → [EXCEPTION: Credit Check]    │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  STEP 3: COMPARE & IDENTIFY                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  Overlay traces on static graph:                                     │    │
+│  │                                                                      │    │
+│  │  ▓▓▓ = Common path (all tests)                                       │    │
+│  │  ░░░ = Variant path (some tests)                                     │    │
+│  │  ▒▒▒ = Error path (failing tests only)                               │    │
+│  │  ─── = Dead code (never executed)                                    │    │
+│  │                                                                      │    │
+│  │  INSIGHTS:                                                           │    │
+│  │  • APPLY_DISCOUNT only called with promo codes → edge case!          │    │
+│  │  • REVERSE_POSTING never tested → missing test coverage!             │    │
+│  │  • Credit check failure → need negative test case!                   │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  STEP 4: GENERATE BETTER TESTS                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  AI generates test cases for uncovered paths:                        │    │
+│  │                                                                      │    │
+│  │  • Test CANCEL_ORDER → REVERSE_POSTING flow                          │    │
+│  │  • Test discount = 0 edge case (division by zero?)                   │    │
+│  │  • Test concurrent order creation                                    │    │
+│  │  • Test boundary values for quantity/price                           │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### RCA with Multiple Test Variants
+
+The key insight: **Run the same code with different inputs and compare execution paths**
+
+```javascript
+// Run 3 variants of the same test
+const variants = [
+  { customer: "GOOD_CUST", product: "NORMAL", expected: "success" },
+  { customer: "BAD_CUST", product: "NORMAL", expected: "credit_fail" },
+  { customer: "GOOD_CUST", product: "PROMO", expected: "discount_applied" },
+];
+
+for (const variant of variants) {
+  // Set statement breakpoint on all method entries
+  ws.send({ action: "setBreakpoint", params: { kind: "statement", statement: "METHOD" }});
+
+  // Run test
+  mcp.RunUnitTests({ ... variant ... });
+
+  // Collect trace
+  const trace = [];
+  while (true) {
+    const step = await ws.send({ action: "step", params: { type: "over" }});
+    trace.push({ program: step.program, line: step.line, procedure: step.procedure });
+    if (step.ended) break;
+  }
+
+  variant.trace = trace;
+}
+
+// Compare traces → find divergence points → identify root cause
+const divergencePoint = findFirstDifference(variants[0].trace, variants[1].trace);
+// "Traces diverge at ZCL_CUSTOMER=>CHECK_CREDIT line 45"
+```
+
+### Benefits for RCA
+
+| Capability | Without Smart Tracing | With Smart Tracing |
+|------------|----------------------|-------------------|
+| Find failure point | Manual investigation | Automatic via trace comparison |
+| Identify edge cases | Developer intuition | Data-driven analysis |
+| Test coverage gaps | Code coverage tools | Execution path analysis |
+| Regression detection | Hope for the best | Compare before/after traces |
+
+---
+
+## See Also
+
+- `reports/2025-12-19-001-websocket-debugging-deep-dive.md` - Comprehensive documentation
+- `reports/2025-12-18-002-websocket-rfc-handler.md` - RFC domain documentation
+- `reports/2025-12-05-013-ai-powered-rca-workflows.md` - RCA workflow design
+- `reports/2025-12-05-014-debugger-scripting-vision.md` - Debugger scripting architecture
