@@ -7,7 +7,7 @@
 | Metric | Value |
 |--------|-------|
 | MCP Tools | 94 |
-| Unit Tests | 216 |
+| Unit Tests | 244 |
 | Platforms | Linux, macOS, Windows (x64, ARM64) |
 | Phase | 5 - TAS-Style Debugging ✅ |
 

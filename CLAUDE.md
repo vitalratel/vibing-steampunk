@@ -206,7 +206,7 @@ See `pkg/adt/amdp_session.go` for full implementation.
 
 ## Testing
 
-### Unit Tests (216 tests)
+### Unit Tests (244 tests)
 - Mock HTTP client (see `client_test.go`, `http_test.go`, `workflows_test.go`)
 - Cookie parsing tests (`cookies_test.go`)
 - Unified tools tests (GetSource, WriteSource, GrepObjects, GrepPackages)
@@ -361,7 +361,7 @@ When creating a new report:
 | Metric | Value |
 |--------|-------|
 | **Tools** | 94 (46 focused, 94 expert) |
-| **Unit Tests** | 216 |
+| **Unit Tests** | 244 |
 | **Integration Tests** | 34 |
 | **Platforms** | 9 |
 | **Phase** | 5 (TAS-Style Debugging) - Complete |
