@@ -79,10 +79,10 @@ end
 **Files:** `pkg/scripting/lua.go`, `internal/mcp/lua_bindings.go`
 
 #### 5.2 Variable History Recording
-- [ ] Design execution frame structure
-- [ ] Implement frame capture at each debug step
-- [ ] Delta compression for storage efficiency
-- [ ] "Show state at step N" command
+- [x] Design execution frame structure
+- [x] Implement frame capture at each debug step
+- [x] Delta compression for storage efficiency
+- [x] "Show state at step N" command
 
 ```go
 type ExecutionFrame struct {

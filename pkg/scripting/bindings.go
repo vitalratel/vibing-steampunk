@@ -51,6 +51,20 @@ func (e *LuaEngine) registerADTBindings() {
 	e.L.SetGlobal("listCheckpoints", e.L.NewFunction(e.luaListCheckpoints))
 	e.L.SetGlobal("injectCheckpoint", e.L.NewFunction(e.luaInjectCheckpoint))
 
+	// Execution Recording (Phase 5.2)
+	e.L.SetGlobal("startRecording", e.L.NewFunction(e.luaStartRecording))
+	e.L.SetGlobal("stopRecording", e.L.NewFunction(e.luaStopRecording))
+	e.L.SetGlobal("getRecording", e.L.NewFunction(e.luaGetRecording))
+	e.L.SetGlobal("saveRecording", e.L.NewFunction(e.luaSaveRecording))
+
+	// History Navigation (Phase 5.2)
+	e.L.SetGlobal("getStateAtStep", e.L.NewFunction(e.luaGetStateAtStep))
+	e.L.SetGlobal("findWhenChanged", e.L.NewFunction(e.luaFindWhenChanged))
+	e.L.SetGlobal("findChanges", e.L.NewFunction(e.luaFindChanges))
+	e.L.SetGlobal("listRecordings", e.L.NewFunction(e.luaListRecordings))
+	e.L.SetGlobal("loadRecording", e.L.NewFunction(e.luaLoadRecording))
+	e.L.SetGlobal("compareRecordings", e.L.NewFunction(e.luaCompareRecordings))
+
 	// Diagnostics
 	e.L.SetGlobal("getDumps", e.L.NewFunction(e.luaGetDumps))
 	e.L.SetGlobal("getDump", e.L.NewFunction(e.luaGetDump))
@@ -809,6 +823,281 @@ func (e *LuaEngine) luaSyntaxCheck(L *lua.LState) int {
 		L.SetField(row, "severity", lua.LString(e.Severity))
 		tbl.RawSetInt(i+1, row)
 	}
+
+	L.Push(tbl)
+	return 1
+}
+
+// --- Execution Recording (Phase 5.2) ---
+
+func (e *LuaEngine) luaStartRecording(L *lua.LState) int {
+	sessionID := getOptString(L, 1, "default")
+	program := getOptString(L, 2, "")
+
+	e.recorder = adt.NewExecutionRecorder(sessionID, program)
+	e.isRecording = true
+
+	L.Push(lua.LString(e.recorder.GetRecording().ID))
+	return 1
+}
+
+func (e *LuaEngine) luaStopRecording(L *lua.LState) int {
+	if e.recorder == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	e.recorder.Complete()
+	e.isRecording = false
+
+	stats := e.recorder.Stats()
+	L.Push(goToLua(L, stats))
+	return 1
+}
+
+func (e *LuaEngine) luaGetRecording(L *lua.LState) int {
+	if e.recorder == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	recording := e.recorder.GetRecording()
+	tbl := L.NewTable()
+	L.SetField(tbl, "id", lua.LString(recording.ID))
+	L.SetField(tbl, "session_id", lua.LString(recording.SessionID))
+	L.SetField(tbl, "program", lua.LString(recording.Program))
+	L.SetField(tbl, "total_steps", lua.LNumber(recording.TotalSteps))
+	L.SetField(tbl, "current_step", lua.LNumber(recording.CurrentStep))
+	L.SetField(tbl, "is_complete", lua.LBool(recording.IsComplete))
+
+	// Checkpoints
+	checkpoints := L.NewTable()
+	for name, step := range recording.Checkpoints {
+		L.SetField(checkpoints, name, lua.LNumber(step))
+	}
+	L.SetField(tbl, "checkpoints", checkpoints)
+
+	L.Push(tbl)
+	return 1
+}
+
+func (e *LuaEngine) luaSaveRecording(L *lua.LState) int {
+	if e.recorder == nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	storePath := getOptString(L, 1, ".vsp-recordings")
+
+	// Initialize history manager if needed
+	if e.historyManager == nil {
+		var err error
+		e.historyManager, err = adt.NewHistoryManager(storePath)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	}
+
+	if err := e.historyManager.SaveRecording(e.recorder); err != nil {
+		L.Push(lua.LBool(false))
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	L.Push(lua.LBool(true))
+	L.Push(lua.LString(e.recorder.GetRecording().ID))
+	return 2
+}
+
+// --- History Navigation (Phase 5.2) ---
+
+func (e *LuaEngine) luaGetStateAtStep(L *lua.LState) int {
+	stepNumber := int(L.ToNumber(1))
+
+	if e.recorder == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	vars := e.recorder.GetVariablesAtStep(stepNumber)
+	if vars == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(fmt.Sprintf("step %d not found", stepNumber)))
+		return 2
+	}
+
+	tbl := L.NewTable()
+	for name, v := range vars {
+		row := L.NewTable()
+		L.SetField(row, "name", lua.LString(v.Name))
+		L.SetField(row, "type", lua.LString(v.Type))
+		L.SetField(row, "value", goToLua(L, v.Value))
+		L.SetField(row, "is_changed", lua.LBool(v.IsChanged))
+		tbl.RawSetString(name, row)
+	}
+
+	L.Push(tbl)
+	return 1
+}
+
+func (e *LuaEngine) luaFindWhenChanged(L *lua.LState) int {
+	variableName := getString(L, 1)
+	targetValue := luaToGo(L.Get(2))
+
+	if e.recorder == nil {
+		L.Push(lua.LNumber(-1))
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	step := e.recorder.FindWhenChanged(variableName, targetValue)
+	L.Push(lua.LNumber(step))
+	return 1
+}
+
+func (e *LuaEngine) luaFindChanges(L *lua.LState) int {
+	variableName := getString(L, 1)
+
+	if e.recorder == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString("no active recording"))
+		return 2
+	}
+
+	changes := e.recorder.FindChanges(variableName)
+
+	tbl := L.NewTable()
+	for i, step := range changes {
+		tbl.RawSetInt(i+1, lua.LNumber(step))
+	}
+
+	L.Push(tbl)
+	return 1
+}
+
+func (e *LuaEngine) luaListRecordings(L *lua.LState) int {
+	storePath := getOptString(L, 1, ".vsp-recordings")
+
+	// Initialize history manager if needed
+	if e.historyManager == nil {
+		var err error
+		e.historyManager, err = adt.NewHistoryManager(storePath)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	}
+
+	recordings := e.historyManager.ListRecordings(adt.RecordingFilter{
+		Limit: getOptInt(L, 2, 20),
+	})
+
+	tbl := L.NewTable()
+	for i, rec := range recordings {
+		row := L.NewTable()
+		L.SetField(row, "id", lua.LString(rec.ID))
+		L.SetField(row, "session_id", lua.LString(rec.SessionID))
+		L.SetField(row, "program", lua.LString(rec.Program))
+		L.SetField(row, "total_steps", lua.LNumber(rec.TotalSteps))
+		L.SetField(row, "is_complete", lua.LBool(rec.IsComplete))
+		L.SetField(row, "start_time", lua.LString(rec.StartTime.Format(time.RFC3339)))
+		tbl.RawSetInt(i+1, row)
+	}
+
+	L.Push(tbl)
+	return 1
+}
+
+func (e *LuaEngine) luaLoadRecording(L *lua.LState) int {
+	recordingID := getString(L, 1)
+	storePath := getOptString(L, 2, ".vsp-recordings")
+
+	// Initialize history manager if needed
+	if e.historyManager == nil {
+		var err error
+		e.historyManager, err = adt.NewHistoryManager(storePath)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	}
+
+	recording, err := e.historyManager.LoadRecording(recordingID)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	tbl := L.NewTable()
+	L.SetField(tbl, "id", lua.LString(recording.ID))
+	L.SetField(tbl, "session_id", lua.LString(recording.SessionID))
+	L.SetField(tbl, "program", lua.LString(recording.Program))
+	L.SetField(tbl, "total_steps", lua.LNumber(recording.TotalSteps))
+	L.SetField(tbl, "is_complete", lua.LBool(recording.IsComplete))
+
+	// Include frames summary
+	frames := L.NewTable()
+	for i, frame := range recording.Frames {
+		row := L.NewTable()
+		L.SetField(row, "step", lua.LNumber(frame.StepNumber))
+		L.SetField(row, "program", lua.LString(frame.Location.Program))
+		L.SetField(row, "line", lua.LNumber(frame.Location.Line))
+		L.SetField(row, "type", lua.LString(frame.StepType))
+		frames.RawSetInt(i+1, row)
+	}
+	L.SetField(tbl, "frames", frames)
+
+	L.Push(tbl)
+	return 1
+}
+
+func (e *LuaEngine) luaCompareRecordings(L *lua.LState) int {
+	id1 := getString(L, 1)
+	id2 := getString(L, 2)
+	storePath := getOptString(L, 3, ".vsp-recordings")
+
+	// Initialize history manager if needed
+	if e.historyManager == nil {
+		var err error
+		e.historyManager, err = adt.NewHistoryManager(storePath)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	}
+
+	comparison, err := e.historyManager.CompareRecordings(id1, id2)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	tbl := L.NewTable()
+	L.SetField(tbl, "recording1_id", lua.LString(comparison.Recording1ID))
+	L.SetField(tbl, "recording2_id", lua.LString(comparison.Recording2ID))
+	L.SetField(tbl, "steps_compared", lua.LNumber(comparison.StepsCompared))
+	L.SetField(tbl, "paths_match", lua.LBool(comparison.PathsMatch))
+
+	diffs := L.NewTable()
+	for i, diff := range comparison.Differences {
+		row := L.NewTable()
+		L.SetField(row, "type", lua.LString(diff.Type))
+		L.SetField(row, "step", lua.LNumber(diff.StepNumber))
+		L.SetField(row, "description", lua.LString(diff.Description))
+		diffs.RawSetInt(i+1, row)
+	}
+	L.SetField(tbl, "differences", diffs)
 
 	L.Push(tbl)
 	return 1

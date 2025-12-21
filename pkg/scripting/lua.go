@@ -24,6 +24,11 @@ type LuaEngine struct {
 
 	// Checkpoints (for Force Replay)
 	checkpoints map[string]map[string]interface{}
+
+	// Execution Recording (Phase 5.2)
+	recorder       *adt.ExecutionRecorder
+	historyManager *adt.HistoryManager
+	isRecording    bool
 }
 
 // NewLuaEngine creates a new Lua engine with ADT client bindings.
@@ -151,8 +156,22 @@ Debugging:
 Recording & Checkpoints:
   saveCheckpoint(name)            Save current state
   getCheckpoint(name)             Get saved state
-  compareCheckpoints(a, b)        Compare two checkpoints
+  listCheckpoints()               List all checkpoints
   injectCheckpoint(name)          Inject saved state (FORCE REPLAY!)
+
+Execution Recording (Phase 5.2):
+  startRecording([session], [program])  Start recording execution
+  stopRecording()                       Stop and get statistics
+  getRecording()                        Get current recording info
+  saveRecording([path])                 Save recording to disk
+
+History Navigation:
+  getStateAtStep(stepNumber)      Get variable state at step N
+  findWhenChanged(var, value)     Find when variable became value
+  findChanges(varName)            Find all steps where var changed
+  listRecordings([path])          List saved recordings
+  loadRecording(id, [path])       Load a saved recording
+  compareRecordings(id1, id2)     Compare two recordings
 
 Utilities:
   print(...)                      Print values
