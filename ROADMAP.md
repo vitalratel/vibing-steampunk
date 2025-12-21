@@ -107,9 +107,10 @@ type ExecutionFrame struct {
 **Files:** `pkg/adt/checkpoint.go`
 
 #### 5.4 Watchpoint Scripting
-- [ ] Scriptable watchpoint conditions
-- [ ] Callback on variable change
-- [ ] Anomaly detection hooks
+- [x] Scriptable watchpoint conditions
+- [x] All breakpoint types: line, statement, exception, message, BAdi, enhancement, watchpoint, method
+- [ ] Callback on variable change (future: event-driven)
+- [ ] Anomaly detection hooks (future: AI integration)
 
 **Effort:** 1 week
 

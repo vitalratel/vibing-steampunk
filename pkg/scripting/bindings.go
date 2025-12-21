@@ -21,6 +21,11 @@ func (e *LuaEngine) registerADTBindings() {
 	e.L.SetGlobal("setBreakpoint", e.L.NewFunction(e.luaSetBreakpoint))
 	e.L.SetGlobal("setStatementBP", e.L.NewFunction(e.luaSetStatementBreakpoint))
 	e.L.SetGlobal("setExceptionBP", e.L.NewFunction(e.luaSetExceptionBreakpoint))
+	e.L.SetGlobal("setMessageBP", e.L.NewFunction(e.luaSetMessageBreakpoint))
+	e.L.SetGlobal("setBadiBP", e.L.NewFunction(e.luaSetBadiBreakpoint))
+	e.L.SetGlobal("setEnhancementBP", e.L.NewFunction(e.luaSetEnhancementBreakpoint))
+	e.L.SetGlobal("setWatchpoint", e.L.NewFunction(e.luaSetWatchpoint))
+	e.L.SetGlobal("setMethodBP", e.L.NewFunction(e.luaSetMethodBreakpoint))
 	e.L.SetGlobal("getBreakpoints", e.L.NewFunction(e.luaGetBreakpoints))
 	e.L.SetGlobal("deleteBreakpoint", e.L.NewFunction(e.luaDeleteBreakpoint))
 
@@ -276,6 +281,152 @@ func (e *LuaEngine) luaSetExceptionBreakpoint(L *lua.LState) int {
 			Kind:      adt.BreakpointKindException,
 			Exception: exception,
 			Enabled:   true,
+		}},
+	}
+
+	resp, err := e.client.SetExternalBreakpoint(e.ctx, req)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	if len(resp.Breakpoints) > 0 {
+		L.Push(lua.LString(resp.Breakpoints[0].ID))
+	} else {
+		L.Push(lua.LString(""))
+	}
+	return 1
+}
+
+// setMessageBP(msgClass, msgNumber, [msgType]) - Break on message
+func (e *LuaEngine) luaSetMessageBreakpoint(L *lua.LState) int {
+	msgArea := getString(L, 1)   // Message class e.g. "00", "SY"
+	msgID := getString(L, 2)     // Message number e.g. "001"
+	msgType := getOptString(L, 3, "") // Optional: E, W, I, S, A
+
+	req := &adt.BreakpointRequest{
+		Breakpoints: []adt.Breakpoint{{
+			Kind:        adt.BreakpointKindMessage,
+			MessageArea: msgArea,
+			MessageID:   msgID,
+			MessageType: msgType,
+			Enabled:     true,
+		}},
+	}
+
+	resp, err := e.client.SetExternalBreakpoint(e.ctx, req)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	if len(resp.Breakpoints) > 0 {
+		L.Push(lua.LString(resp.Breakpoints[0].ID))
+	} else {
+		L.Push(lua.LString(""))
+	}
+	return 1
+}
+
+// setBadiBP(badiName) - Break on BAdi implementation entry
+func (e *LuaEngine) luaSetBadiBreakpoint(L *lua.LState) int {
+	badiName := getString(L, 1)
+
+	req := &adt.BreakpointRequest{
+		Breakpoints: []adt.Breakpoint{{
+			Kind:     adt.BreakpointKindBadi,
+			BadiName: badiName,
+			Enabled:  true,
+		}},
+	}
+
+	resp, err := e.client.SetExternalBreakpoint(e.ctx, req)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	if len(resp.Breakpoints) > 0 {
+		L.Push(lua.LString(resp.Breakpoints[0].ID))
+	} else {
+		L.Push(lua.LString(""))
+	}
+	return 1
+}
+
+// setEnhancementBP(spotName, [implName]) - Break on enhancement point
+func (e *LuaEngine) luaSetEnhancementBreakpoint(L *lua.LState) int {
+	spotName := getString(L, 1)
+	implName := getOptString(L, 2, "")
+
+	req := &adt.BreakpointRequest{
+		Breakpoints: []adt.Breakpoint{{
+			Kind:            adt.BreakpointKindEnhancement,
+			EnhancementSpot: spotName,
+			EnhancementImpl: implName,
+			Enabled:         true,
+		}},
+	}
+
+	resp, err := e.client.SetExternalBreakpoint(e.ctx, req)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	if len(resp.Breakpoints) > 0 {
+		L.Push(lua.LString(resp.Breakpoints[0].ID))
+	} else {
+		L.Push(lua.LString(""))
+	}
+	return 1
+}
+
+// setWatchpoint(variable, [condition]) - Break when variable changes
+// condition: "change" (default), "read", "any"
+func (e *LuaEngine) luaSetWatchpoint(L *lua.LState) int {
+	variable := getString(L, 1)
+	condition := getOptString(L, 2, "change")
+
+	req := &adt.BreakpointRequest{
+		Breakpoints: []adt.Breakpoint{{
+			Kind:           adt.BreakpointKindWatchpoint,
+			Variable:       variable,
+			WatchCondition: condition,
+			Enabled:        true,
+		}},
+	}
+
+	resp, err := e.client.SetExternalBreakpoint(e.ctx, req)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	if len(resp.Breakpoints) > 0 {
+		L.Push(lua.LString(resp.Breakpoints[0].ID))
+	} else {
+		L.Push(lua.LString(""))
+	}
+	return 1
+}
+
+// setMethodBP(className, methodName) - Break on method entry
+func (e *LuaEngine) luaSetMethodBreakpoint(L *lua.LState) int {
+	className := getString(L, 1)
+	methodName := getString(L, 2)
+
+	req := &adt.BreakpointRequest{
+		Breakpoints: []adt.Breakpoint{{
+			Kind:       adt.BreakpointKindMethod,
+			ClassName:  className,
+			MethodName: methodName,
+			Enabled:    true,
 		}},
 	}
 

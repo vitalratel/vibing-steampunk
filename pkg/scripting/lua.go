@@ -133,10 +133,15 @@ Search & Source:
   writeSource(type, name, src)    Write source code
   editSource(type, name, old, new) Edit source code
 
-Debugging:
+Debugging - Breakpoints:
   setBreakpoint(prog, line)       Set line breakpoint
-  setStatementBP(statement)       Set statement breakpoint
-  setExceptionBP(exception)       Set exception breakpoint
+  setStatementBP(statement)       Set statement breakpoint (e.g., "COMMIT")
+  setExceptionBP(exception)       Set exception breakpoint (e.g., "CX_SY_ZERODIVIDE")
+  setMessageBP(class, num, [type]) Set message breakpoint (e.g., "00", "001", "E")
+  setBadiBP(badiName)             Set BAdi breakpoint
+  setEnhancementBP(spot, [impl])  Set enhancement point breakpoint
+  setWatchpoint(var, [condition]) Set watchpoint (condition: change/read/any)
+  setMethodBP(class, method)      Set method entry breakpoint
   getBreakpoints()                List active breakpoints
   deleteBreakpoint(id)            Delete a breakpoint
 

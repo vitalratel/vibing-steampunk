@@ -17,10 +17,14 @@ import (
 type BreakpointKind string
 
 const (
-	BreakpointKindLine      BreakpointKind = "line"
-	BreakpointKindStatement BreakpointKind = "statement"
-	BreakpointKindException BreakpointKind = "exception"
-	BreakpointKindMessage   BreakpointKind = "message"
+	BreakpointKindLine        BreakpointKind = "line"
+	BreakpointKindStatement   BreakpointKind = "statement"
+	BreakpointKindException   BreakpointKind = "exception"
+	BreakpointKindMessage     BreakpointKind = "message"
+	BreakpointKindBadi        BreakpointKind = "badi"        // Business Add-In breakpoint
+	BreakpointKindEnhancement BreakpointKind = "enhancement" // Enhancement point breakpoint
+	BreakpointKindWatchpoint  BreakpointKind = "watchpoint"  // Data watchpoint (variable change)
+	BreakpointKindMethod      BreakpointKind = "method"      // Method/function entry breakpoint
 )
 
 // BreakpointScope determines the lifetime of a breakpoint.
@@ -78,13 +82,28 @@ type Breakpoint struct {
 	ID          string         `json:"id"`
 	Kind        BreakpointKind `json:"kind"`
 	Enabled     bool           `json:"enabled"`
-	URI         string         `json:"uri,omitempty"`        // ADT URI for line breakpoints
-	Line        int            `json:"line,omitempty"`       // Line number for line breakpoints
-	Condition   string         `json:"condition,omitempty"`  // Optional condition expression
-	Statement   string         `json:"statement,omitempty"`  // Statement type for statement breakpoints
-	Exception   string         `json:"exception,omitempty"`  // Exception class for exception breakpoints
-	MessageID   string         `json:"messageId,omitempty"`  // Message ID for message breakpoints
+	URI         string         `json:"uri,omitempty"`         // ADT URI for line breakpoints
+	Line        int            `json:"line,omitempty"`        // Line number for line breakpoints
+	Condition   string         `json:"condition,omitempty"`   // Optional condition expression
+	Statement   string         `json:"statement,omitempty"`   // Statement type for statement breakpoints
+	Exception   string         `json:"exception,omitempty"`   // Exception class for exception breakpoints
+	MessageID   string         `json:"messageId,omitempty"`   // Message ID for message breakpoints
 	MessageType string         `json:"messageType,omitempty"` // Message type (E, W, I, S, A)
+	MessageArea string         `json:"messageArea,omitempty"` // Message class/area (e.g., "00", "SY")
+
+	// BAdi and Enhancement breakpoints
+	BadiName        string `json:"badiName,omitempty"`        // BAdi definition name
+	EnhancementSpot string `json:"enhancementSpot,omitempty"` // Enhancement spot name
+	EnhancementImpl string `json:"enhancementImpl,omitempty"` // Enhancement implementation name
+
+	// Watchpoint (data breakpoint)
+	Variable       string `json:"variable,omitempty"`       // Variable name to watch
+	WatchCondition string `json:"watchCondition,omitempty"` // When to trigger: "change", "read", "any"
+
+	// Method breakpoint
+	ClassName  string `json:"className,omitempty"`  // Class name for method breakpoint
+	MethodName string `json:"methodName,omitempty"` // Method name for method breakpoint
+
 	// Read-only fields returned by SAP
 	ActualLine int    `json:"actualLine,omitempty"` // Actual line after adjustment
 	IsActive   bool   `json:"isActive,omitempty"`   // Whether BP is currently active
