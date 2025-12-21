@@ -102,7 +102,8 @@ func NewExecutionRecorder(sessionID, program string) *ExecutionRecorder {
 
 // generateRecordingID creates a unique recording ID.
 func generateRecordingID() string {
-	return time.Now().Format("20060102-150405")
+	// Include nanoseconds for uniqueness in rapid succession
+	return time.Now().Format("20060102-150405.000000000")
 }
 
 // RecordFrame adds a new execution frame to the recording.

@@ -2,14 +2,14 @@
 
 > Last Updated: 2025-12-21
 
-## Current Status: v2.13.0
+## Current Status: v2.15.0
 
 | Metric | Value |
 |--------|-------|
-| MCP Tools | 75+ |
-| Unit Tests | 270+ |
+| MCP Tools | 94 |
+| Unit Tests | 216 |
 | Platforms | Linux, macOS, Windows (x64, ARM64) |
-| Phase | 4 - Call Graph & RCA Tools |
+| Phase | 5 - TAS-Style Debugging ✅ |
 
 ---
 
@@ -51,11 +51,7 @@
 - [x] TraceExecution composite RCA tool
 - [x] Static vs actual call graph comparison
 
----
-
-## In Progress: Phase 5
-
-### Phase 5: TAS-Style Debugging (Q1 2026)
+### Phase 5: TAS-Style Debugging (v2.14-2.15) ✅
 
 **Goal:** Scriptable, replayable debugging inspired by Tool-Assisted Speedruns.
 
@@ -63,7 +59,7 @@
 - [x] Integrate gopher-lua into vsp
 - [x] Expose all MCP tools to Lua
 - [x] Create Lua REPL for interactive debugging
-- [ ] Document scripting API (examples created)
+- [x] Document scripting API (examples + reports)
 
 ```lua
 -- Target API
@@ -98,21 +94,15 @@ type ExecutionFrame struct {
 **Files:** `pkg/adt/recorder.go`, `pkg/adt/history.go`
 
 #### 5.3 Checkpoint System
-- [ ] Serialize variable state to JSON
-- [ ] Store checkpoints locally
-- [ ] Restore checkpoint (variable inspection only)
-- [ ] Checkpoint management commands
-
-**Effort:** 1 week
-**Files:** `pkg/adt/checkpoint.go`
+- [x] Serialize variable state to JSON
+- [x] Store checkpoints locally (in-memory + file)
+- [x] Restore checkpoint (variable inspection)
+- [x] Checkpoint management commands (save/get/list)
 
 #### 5.4 Watchpoint Scripting
 - [x] Scriptable watchpoint conditions
 - [x] All breakpoint types: line, statement, exception, message, BAdi, enhancement, watchpoint, method
-- [ ] Callback on variable change (future: event-driven)
-- [ ] Anomaly detection hooks (future: AI integration)
-
-**Effort:** 1 week
+- [x] 8 breakpoint type functions in Lua
 
 #### 5.5 Force Replay (State Injection)
 - [x] SetVariable API (modify variables in live session)
@@ -120,16 +110,21 @@ type ExecutionFrame struct {
 - [x] ForceReplay (inject state from recording at specific step)
 - [x] ReplayFromStep (inject state from current recording)
 
-**Effort:** 1 week
-
 ```lua
 -- The killer feature: Inject production state into dev session
 forceReplay("production_dump_001")  -- Inject and debug!
 ```
 
+#### 5.6 Testing & Documentation
+- [x] 59 unit tests (recorder, history, Lua bindings)
+- [x] E2E test script (`examples/scripts/phase5-experiment.lua`)
+- [x] Testing methodology report
+- [x] Data extraction examples report
+- [x] Live experiment documentation
+
 ---
 
-## Planned: Phase 6
+## Next: Phase 6
 
 ### Phase 6: Test Case Extraction (Q2 2026)
 
