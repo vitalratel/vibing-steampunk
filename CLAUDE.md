@@ -436,58 +436,51 @@ pipeline := dsl.RAPPipeline(client, "./src/", "$ZRAY", "ZTRAVEL_SB")
 
 ## Last Session Reference (2025-12-23)
 
-### Objective: abapGit WebSocket Integration - COMPLETED ✅
+### Objective: Install Tools Upsert Logic - COMPLETED ✅
 
-Implemented abapGit integration via ZADT_VSP WebSocket handler, enabling import/export of 158 abapGit-supported object types.
+Fixed package and object existence checks in InstallDummyTest and InstallZADTVSP tools to use proper upsert strategy.
 
 ### What Was Completed
 
-1. ✅ **APC Handler Updated** - Git service registered in `class_constructor`, version 2.2.0
-2. ✅ **Nested JSON Fix** - Fixed `parse_message` to handle nested braces in params
-3. ✅ **Git Service Deployed** - `ZCL_VSP_GIT_SERVICE` with `getTypes` (158 types) and `export` actions
-4. ✅ **Go Client** - `pkg/adt/git.go` with `GitTypes()` and `GitExport()` methods
-5. ✅ **MCP Tools** - `GitTypes` and `GitExport` tools registered (group "G" for disabling)
-6. ✅ **Tests Pass** - All 244+ unit tests passing
+1. ✅ **Package Existence Check Fixed** - `GetPackage` returns empty URI when package doesn't exist; now checks `pkg.URI != ""`
+2. ✅ **InstallDummyTest Upsert** - Pre-checks interface/class existence, reports CREATE vs UPDATE
+3. ✅ **InstallZADTVSP Upsert** - Same package existence fix applied
+4. ✅ **check_only Mode Enhanced** - Shows `[CREATE]` or `[UPDATE]` for each object
+5. ✅ **Tested on a4h-110** - Both tools work correctly after fixes
 
-### New Files Created
+### Bug Fixed
 
-| File | Purpose |
-|------|---------|
-| `pkg/adt/git.go` | Go WebSocket client for Git operations |
-| `reports/2025-12-23-001-heavyweight-operations-architecture.md` | Architecture report for large payloads |
+**Root cause**: `GetPackage` API returns a minimal response with empty `URI` field when package doesn't exist (no error). The old check `if err == nil` was giving false positives.
 
-### Updated Files
+**Solution**: Check `pkg.URI != ""` to verify package actually exists.
+
+### Files Updated
 
 | File | Changes |
 |------|---------|
-| `embedded/abap/zcl_vsp_apc_handler.clas.abap` | Fixed nested JSON parsing, registered git service |
-| `internal/mcp/server.go` | Added GitTypes/GitExport tools and handlers |
+| `internal/mcp/server.go` | Fixed package checks in both Install tools, added object pre-checks |
 
-### Technical Notes
+### Test Results on a4h-110
 
-- **Nested JSON fix**: The params regex `(\{[^}]*\})` was breaking on nested objects. Replaced with brace-counting algorithm.
-- **Tool group "G"**: Git tools can be disabled via `--disabled-groups G`
-- **abapGit types**: 158 object types supported (CLAS, INTF, PROG, DDLS, BDEF, etc.)
-
-### Usage Examples
-
-```bash
-# Get supported object types
-vsp git-types
-
-# Export a package
-vsp git-export --packages "$ZADT_VSP"
-
-# Export specific objects
-vsp git-export --objects '[{"type":"CLAS","name":"ZCL_TEST"}]'
+```
+InstallDummyTest - 8/8 steps passed
+InstallZADTVSP - 6/6 objects deployed
 ```
 
-### What's Left (Future Work)
+### Code Pattern (for future reference)
 
-1. **GitImport** - Import from ZIP (requires `ZCL_ABAPGIT_OBJECTS=>deserialize`)
-2. **Chunked Streaming** - For large package exports (see architecture report)
-3. **Progress Updates** - Real-time feedback during export
+```go
+// Proper package existence check
+pkg, err := s.adtClient.GetPackage(ctx, packageName)
+packageExists := err == nil && pkg.URI != "" // URI empty = doesn't exist
 
-### Related Reports
-- `reports/2025-12-23-001-heavyweight-operations-architecture.md` - Chunked streaming design
-- `reports/2025-12-22-003-websocket-abapgit-integration.md` - Original design document
+// Object existence check
+results, _ := s.adtClient.SearchObject(ctx, objectName, 1)
+objectExists := len(results) > 0 && results[0].Name == objectName
+```
+
+### Previous Session: abapGit WebSocket Integration
+
+- GitTypes/GitExport tools (158 object types)
+- Nested JSON parsing fix in APC handler
+- Tool group "G" for disabling Git tools

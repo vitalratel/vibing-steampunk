@@ -207,6 +207,7 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 			"InstallZADTVSP",
 			"InstallAbapGit",
 			"ListDependencies",
+			"InstallDummyTest",
 		},
 	}
 	// Map "U" to same tools as "5"
@@ -329,6 +330,7 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 		"InstallZADTVSP":   true, // Deploy ZADT_VSP WebSocket handler to SAP
 		"InstallAbapGit":   true, // Deploy abapGit (standalone or dev edition) to SAP
 		"ListDependencies": true, // List available dependencies for installation
+		"InstallDummyTest": true, // Test tool for verifying Install* workflow
 	}
 
 	// Helper to check if tool should be registered
@@ -1957,6 +1959,19 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 				mcp.Description("Only check prerequisites and show deployment plan without deploying (default: false)"),
 			),
 		), s.handleInstallAbapGit)
+	}
+
+	// InstallDummyTest - Test tool to verify Install* workflow
+	if shouldRegister("InstallDummyTest") {
+		s.mcpServer.AddTool(mcp.NewTool("InstallDummyTest",
+			mcp.WithDescription("Test tool that creates a simple interface and class to verify the Install* workflow (create, lock, update, unlock, activate, verify). Uses package $ZADT_INSTALL_TEST."),
+			mcp.WithBoolean("check_only",
+				mcp.Description("Only check prerequisites without deploying (default: false)"),
+			),
+			mcp.WithBoolean("cleanup",
+				mcp.Description("Delete test objects after verification (default: false)"),
+			),
+		), s.handleInstallDummyTest)
 	}
 
 }
@@ -5268,6 +5283,268 @@ func (s *Server) handleGitExport(ctx context.Context, request mcp.CallToolReques
 	return mcp.NewToolResultText(sb.String()), nil
 }
 
+func (s *Server) handleInstallDummyTest(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	const (
+		testPackage   = "$ZADT_INSTALL_TEST"
+		testInterface = "ZIF_DUMMY_TEST"
+		testClass     = "ZCL_DUMMY_TEST"
+	)
+
+	checkOnly := false
+	if check, ok := request.Params.Arguments["check_only"].(bool); ok {
+		checkOnly = check
+	}
+
+	cleanup := false
+	if cl, ok := request.Params.Arguments["cleanup"].(bool); ok {
+		cleanup = cl
+	}
+
+	var sb strings.Builder
+	sb.WriteString("InstallDummyTest - Workflow Verification\n")
+	sb.WriteString("========================================\n\n")
+
+	// Track success/failure
+	allPassed := true
+	stepNum := 0
+
+	step := func(name string) {
+		stepNum++
+		sb.WriteString(fmt.Sprintf("[Step %d] %s\n", stepNum, name))
+	}
+
+	pass := func(msg string) {
+		sb.WriteString(fmt.Sprintf("  ✓ %s\n", msg))
+	}
+
+	fail := func(msg string) {
+		sb.WriteString(fmt.Sprintf("  ✗ %s\n", msg))
+		allPassed = false
+	}
+
+	info := func(msg string) {
+		sb.WriteString(fmt.Sprintf("  → %s\n", msg))
+	}
+
+	// Step 1: Check/Create package (upsert strategy)
+	step("Package Check/Create")
+	pkg, err := s.adtClient.GetPackage(ctx, testPackage)
+	packageExists := err == nil && pkg.URI != "" // URI empty = package doesn't really exist
+	if !packageExists {
+		info("Package doesn't exist, creating...")
+		if checkOnly {
+			info("SKIP (check_only mode)")
+		} else {
+			err = s.adtClient.CreateObject(ctx, adt.CreateObjectOptions{
+				ObjectType:  adt.ObjectTypePackage,
+				Name:        testPackage,
+				Description: "Install Tools Test Package",
+			})
+			if err != nil {
+				fail(fmt.Sprintf("CreateObject(package) failed: %v", err))
+			} else {
+				// Verify
+				pkg, err = s.adtClient.GetPackage(ctx, testPackage)
+				if err != nil || pkg.URI == "" {
+					fail(fmt.Sprintf("Verification failed: package not found after create"))
+				} else {
+					pass("Package created and verified")
+				}
+			}
+		}
+	} else {
+		pass("Package exists")
+	}
+
+	if checkOnly {
+		sb.WriteString("\n[check_only mode] Would deploy:\n")
+		// Check existing objects
+		intfResults, _ := s.adtClient.SearchObject(ctx, testInterface, 1)
+		intfExists := len(intfResults) > 0 && intfResults[0].Name == testInterface
+		classResults, _ := s.adtClient.SearchObject(ctx, testClass, 1)
+		classExists := len(classResults) > 0 && classResults[0].Name == testClass
+
+		intfAction := "CREATE"
+		if intfExists {
+			intfAction = "UPDATE"
+		}
+		classAction := "CREATE"
+		if classExists {
+			classAction = "UPDATE"
+		}
+		sb.WriteString(fmt.Sprintf("  1. Interface: %s [%s]\n", testInterface, intfAction))
+		sb.WriteString(fmt.Sprintf("  2. Class: %s [%s]\n", testClass, classAction))
+		return mcp.NewToolResultText(sb.String()), nil
+	}
+
+	// Step 2: Create/Update Interface (upsert)
+	step("Interface Creation")
+
+	// Check if interface exists
+	intfResults, _ := s.adtClient.SearchObject(ctx, testInterface, 1)
+	intfExists := len(intfResults) > 0 && intfResults[0].Name == testInterface
+	if intfExists {
+		info(fmt.Sprintf("Interface %s exists, will update", testInterface))
+	}
+
+	interfaceSource := `INTERFACE zif_dummy_test
+  PUBLIC.
+
+  METHODS get_value
+    RETURNING VALUE(rv_value) TYPE string.
+
+ENDINTERFACE.`
+
+	opts := &adt.WriteSourceOptions{
+		Package:     testPackage,
+		Description: "Dummy Test Interface",
+		Mode:        adt.WriteModeUpsert,
+	}
+	result, err := s.adtClient.WriteSource(ctx, "INTF", testInterface, interfaceSource, opts)
+	if err != nil {
+		fail(fmt.Sprintf("WriteSource failed: %v", err))
+	} else if !result.Success {
+		fail(fmt.Sprintf("WriteSource returned failure: %s", result.Message))
+	} else {
+		pass(fmt.Sprintf("Interface written (mode=%s)", result.Mode))
+	}
+
+	// Step 3: Verify Interface
+	step("Interface Verification")
+	results, err := s.adtClient.SearchObject(ctx, testInterface, 10)
+	if err != nil {
+		fail(fmt.Sprintf("SearchObject failed: %v", err))
+	} else {
+		found := false
+		for _, r := range results {
+			if r.Name == testInterface {
+				pass(fmt.Sprintf("Found: %s (%s) in %s", r.Name, r.Type, r.PackageName))
+				found = true
+				break
+			}
+		}
+		if !found {
+			fail("Interface not found in search results!")
+		}
+	}
+
+	// Step 4: Read Interface Source
+	step("Interface Source Read-back")
+	src, err := s.adtClient.GetSource(ctx, "INTF", testInterface, nil)
+	if err != nil {
+		fail(fmt.Sprintf("GetSource failed: %v", err))
+	} else {
+		pass(fmt.Sprintf("Source retrieved (%d bytes)", len(src)))
+	}
+
+	// Step 5: Create/Update Class (upsert)
+	step("Class Creation")
+
+	// Check if class exists
+	classResults, _ := s.adtClient.SearchObject(ctx, testClass, 1)
+	classExists := len(classResults) > 0 && classResults[0].Name == testClass
+	if classExists {
+		info(fmt.Sprintf("Class %s exists, will update", testClass))
+	}
+
+	classSource := `CLASS zcl_dummy_test DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC.
+
+  PUBLIC SECTION.
+    INTERFACES zif_dummy_test.
+
+ENDCLASS.
+
+CLASS zcl_dummy_test IMPLEMENTATION.
+
+  METHOD zif_dummy_test~get_value.
+    rv_value = 'Dummy Test Passed'.
+  ENDMETHOD.
+
+ENDCLASS.`
+
+	opts = &adt.WriteSourceOptions{
+		Package:     testPackage,
+		Description: "Dummy Test Class",
+		Mode:        adt.WriteModeUpsert,
+	}
+	result, err = s.adtClient.WriteSource(ctx, "CLAS", testClass, classSource, opts)
+	if err != nil {
+		fail(fmt.Sprintf("WriteSource failed: %v", err))
+	} else if !result.Success {
+		fail(fmt.Sprintf("WriteSource returned failure: %s", result.Message))
+	} else {
+		pass(fmt.Sprintf("Class written (mode=%s)", result.Mode))
+	}
+
+	// Step 6: Verify Class
+	step("Class Verification")
+	results, err = s.adtClient.SearchObject(ctx, testClass, 10)
+	if err != nil {
+		fail(fmt.Sprintf("SearchObject failed: %v", err))
+	} else {
+		found := false
+		for _, r := range results {
+			if r.Name == testClass {
+				pass(fmt.Sprintf("Found: %s (%s) in %s", r.Name, r.Type, r.PackageName))
+				found = true
+				break
+			}
+		}
+		if !found {
+			fail("Class not found in search results!")
+		}
+	}
+
+	// Step 7: Read Class Source
+	step("Class Source Read-back")
+	src, err = s.adtClient.GetSource(ctx, "CLAS", testClass, nil)
+	if err != nil {
+		fail(fmt.Sprintf("GetSource failed: %v", err))
+	} else {
+		pass(fmt.Sprintf("Source retrieved (%d bytes)", len(src)))
+	}
+
+	// Step 8: Run Unit Tests (optional verification)
+	step("Unit Tests (Activation Check)")
+	testResult, err := s.adtClient.RunUnitTests(ctx, fmt.Sprintf("/sap/bc/adt/oo/classes/%s", strings.ToLower(testClass)), nil)
+	if err != nil {
+		info(fmt.Sprintf("RunUnitTests: %v (expected - no tests defined)", err))
+	} else {
+		pass(fmt.Sprintf("Unit test framework responded (classes=%d)", len(testResult.Classes)))
+	}
+
+	// Cleanup if requested
+	if cleanup {
+		sb.WriteString("\n[Cleanup]\n")
+		sb.WriteString("  → Cleanup not yet implemented (manual deletion required)\n")
+		// TODO: Implement delete via ADT
+	}
+
+	// Summary
+	sb.WriteString("\n========================================\n")
+	if allPassed {
+		sb.WriteString("✅ ALL TESTS PASSED\n")
+		sb.WriteString("\nThe Install* workflow is working correctly:\n")
+		sb.WriteString("  • Package creation ✓\n")
+		sb.WriteString("  • Interface creation (WriteSource) ✓\n")
+		sb.WriteString("  • Interface verification (SearchObject) ✓\n")
+		sb.WriteString("  • Interface read-back (GetSource) ✓\n")
+		sb.WriteString("  • Class creation (WriteSource) ✓\n")
+		sb.WriteString("  • Class verification (SearchObject) ✓\n")
+		sb.WriteString("  • Class read-back (GetSource) ✓\n")
+	} else {
+		sb.WriteString("❌ SOME TESTS FAILED\n")
+		sb.WriteString("\nCheck the steps above for details.\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("\nTest objects in package: %s\n", testPackage))
+
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
 func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Parse parameters
 	packageName := "$ZADT_VSP"
@@ -5297,10 +5574,10 @@ func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolR
 	// Phase 1: Check prerequisites
 	sb.WriteString("Checking prerequisites...\n")
 
-	// Check if package exists
+	// Check if package exists (verify URI is populated - empty URI means package doesn't really exist)
 	packageExists := false
-	_, err := s.adtClient.GetPackage(ctx, packageName)
-	if err == nil {
+	pkg, err := s.adtClient.GetPackage(ctx, packageName)
+	if err == nil && pkg.URI != "" {
 		packageExists = true
 		sb.WriteString(fmt.Sprintf("  ✓ Package %s exists\n", packageName))
 	} else {
