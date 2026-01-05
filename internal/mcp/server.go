@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -13,6 +15,17 @@ import (
 	"github.com/oisee/vibing-steampunk/embedded/deps"
 	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
+
+// AsyncTask represents a background task status.
+type AsyncTask struct {
+	ID        string      `json:"id"`
+	Type      string      `json:"type"`       // "report", "export", etc.
+	Status    string      `json:"status"`     // "running", "completed", "error"
+	StartedAt time.Time   `json:"started_at"`
+	EndedAt   *time.Time  `json:"ended_at,omitempty"`
+	Result    interface{} `json:"result,omitempty"`
+	Error     string      `json:"error,omitempty"`
+}
 
 // Server wraps the MCP server with ADT client.
 type Server struct {
@@ -23,6 +36,11 @@ type Server struct {
 	config         *Config                    // Server configuration for session manager creation
 	featureProber  *adt.FeatureProber         // Feature detection system (safety network)
 	featureConfig  adt.FeatureConfig          // Feature configuration
+
+	// Async task management
+	asyncTasks   map[string]*AsyncTask
+	asyncTasksMu sync.RWMutex
+	asyncTaskID  int64
 }
 
 // Config holds MCP server configuration.
@@ -145,6 +163,7 @@ func NewServer(cfg *Config) *Server {
 		config:        cfg,
 		featureProber: featureProber,
 		featureConfig: featureConfig,
+		asyncTasks:    make(map[string]*AsyncTask),
 	}
 
 	// Register tools based on mode and disabled groups
@@ -362,6 +381,8 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 
 		// Report Execution (via ZADT_VSP WebSocket)
 		"RunReport":        true, // Execute reports with params/variants, capture ALV
+		"RunReportAsync":   true, // Background report execution with polling
+		"GetAsyncResult":   true, // Retrieve async task results
 		"GetVariants":      true, // List report variants
 		"GetTextElements":  true, // Get program text elements
 		"SetTextElements":  true, // Set program text elements
@@ -2156,6 +2177,43 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 				mcp.Description("Maximum ALV rows to return when capturing (default: 1000)"),
 			),
 		), s.handleRunReport)
+	}
+
+	// RunReportAsync - Background report execution
+	if shouldRegister("RunReportAsync") {
+		s.mcpServer.AddTool(mcp.NewTool("RunReportAsync",
+			mcp.WithDescription("Start report execution in background. Returns task_id immediately. Use GetAsyncResult to poll for completion. Useful for long-running reports that would timeout."),
+			mcp.WithString("report",
+				mcp.Description("Report program name"),
+				mcp.Required(),
+			),
+			mcp.WithString("variant",
+				mcp.Description("Variant name (optional)"),
+			),
+			mcp.WithString("params",
+				mcp.Description("JSON object with selection screen parameters"),
+			),
+			mcp.WithBoolean("capture_alv",
+				mcp.Description("Capture ALV output (default: false)"),
+			),
+			mcp.WithNumber("max_rows",
+				mcp.Description("Maximum ALV rows (default: 1000)"),
+			),
+		), s.handleRunReportAsync)
+	}
+
+	// GetAsyncResult - Retrieve async task results
+	if shouldRegister("GetAsyncResult") {
+		s.mcpServer.AddTool(mcp.NewTool("GetAsyncResult",
+			mcp.WithDescription("Get result of an async task by ID. Returns status (running/completed/error) and result when done."),
+			mcp.WithString("task_id",
+				mcp.Description("Task ID from RunReportAsync"),
+				mcp.Required(),
+			),
+			mcp.WithBoolean("wait",
+				mcp.Description("If true, block until task completes (max 60s). Default: false (poll)"),
+			),
+		), s.handleGetAsyncResult)
 	}
 
 	// GetVariants
@@ -5971,6 +6029,149 @@ func (s *Server) handleRunReport(ctx context.Context, request mcp.CallToolReques
 	}
 
 	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleRunReportAsync(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Parse parameters
+	report, _ := request.Params.Arguments["report"].(string)
+	if report == "" {
+		return newToolResultError("report parameter is required"), nil
+	}
+
+	params := adt.RunReportParams{
+		Report: report,
+	}
+
+	if variant, ok := request.Params.Arguments["variant"].(string); ok {
+		params.Variant = variant
+	}
+
+	if paramsStr, ok := request.Params.Arguments["params"].(string); ok && paramsStr != "" {
+		var p map[string]string
+		if err := json.Unmarshal([]byte(paramsStr), &p); err != nil {
+			return newToolResultError(fmt.Sprintf("Invalid params JSON: %v", err)), nil
+		}
+		params.Params = p
+	}
+
+	if captureALV, ok := request.Params.Arguments["capture_alv"].(bool); ok {
+		params.CaptureALV = captureALV
+	}
+
+	if maxRows, ok := request.Params.Arguments["max_rows"].(float64); ok {
+		params.MaxRows = int(maxRows)
+	}
+
+	// Generate task ID
+	s.asyncTasksMu.Lock()
+	s.asyncTaskID++
+	taskID := fmt.Sprintf("report_%d_%d", time.Now().Unix(), s.asyncTaskID)
+	task := &AsyncTask{
+		ID:        taskID,
+		Type:      "report",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	s.asyncTasks[taskID] = task
+	s.asyncTasksMu.Unlock()
+
+	// Run report in background goroutine
+	go func() {
+		bgCtx := context.Background()
+
+		// Create WebSocket connection for this goroutine
+		wsClient := adt.NewAMDPWebSocketClient(
+			s.config.BaseURL, s.config.Client, s.config.Username, s.config.Password, s.config.InsecureSkipVerify,
+		)
+		if err := wsClient.Connect(bgCtx); err != nil {
+			s.asyncTasksMu.Lock()
+			now := time.Now()
+			task.Status = "error"
+			task.Error = fmt.Sprintf("WebSocket connect failed: %v", err)
+			task.EndedAt = &now
+			s.asyncTasksMu.Unlock()
+			return
+		}
+		defer wsClient.Close()
+
+		result, err := wsClient.RunReport(bgCtx, params)
+
+		s.asyncTasksMu.Lock()
+		now := time.Now()
+		task.EndedAt = &now
+		if err != nil {
+			task.Status = "error"
+			task.Error = err.Error()
+		} else {
+			task.Status = "completed"
+			task.Result = result
+		}
+		s.asyncTasksMu.Unlock()
+	}()
+
+	// Return task ID immediately
+	output := map[string]string{
+		"task_id": taskID,
+		"status":  "started",
+		"message": "Report execution started in background. Use GetAsyncResult to check status.",
+	}
+	outputJSON, _ := json.MarshalIndent(output, "", "  ")
+	return mcp.NewToolResultText(string(outputJSON)), nil
+}
+
+func (s *Server) handleGetAsyncResult(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	taskID, _ := request.Params.Arguments["task_id"].(string)
+	if taskID == "" {
+		return newToolResultError("task_id parameter is required"), nil
+	}
+
+	wait, _ := request.Params.Arguments["wait"].(bool)
+
+	if wait {
+		// Block until complete or timeout
+		timeout := time.After(60 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			s.asyncTasksMu.RLock()
+			task, exists := s.asyncTasks[taskID]
+			if !exists {
+				s.asyncTasksMu.RUnlock()
+				return newToolResultError(fmt.Sprintf("Task not found: %s", taskID)), nil
+			}
+			status := task.Status
+			s.asyncTasksMu.RUnlock()
+
+			if status != "running" {
+				break
+			}
+
+			select {
+			case <-timeout:
+				return newToolResultError("Timeout waiting for task completion"), nil
+			case <-ticker.C:
+				continue
+			case <-ctx.Done():
+				return newToolResultError("Request cancelled"), nil
+			}
+		}
+	}
+
+	// Get task status
+	s.asyncTasksMu.RLock()
+	task, exists := s.asyncTasks[taskID]
+	if !exists {
+		s.asyncTasksMu.RUnlock()
+		return newToolResultError(fmt.Sprintf("Task not found: %s", taskID)), nil
+	}
+	// Make a copy for safe access
+	taskCopy := *task
+	s.asyncTasksMu.RUnlock()
+
+	// Format output
+	output, _ := json.MarshalIndent(taskCopy, "", "  ")
+	return mcp.NewToolResultText(string(output)), nil
 }
 
 func (s *Server) handleGetVariants(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
