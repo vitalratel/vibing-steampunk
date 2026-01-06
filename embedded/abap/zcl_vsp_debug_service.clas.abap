@@ -744,6 +744,9 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
     DATA lv_statement TYPE string.
     DATA lv_condition TYPE string.
     DATA lv_program TYPE string.
+    DATA lv_method TYPE string.
+    DATA lv_include TYPE string.
+    DATA lv_class TYPE string.
     DATA lo_bp TYPE REF TO if_tpdapi_bp.
 
     lv_kind = extract_param( iv_params = is_message-params iv_name = 'kind' ).
@@ -753,6 +756,8 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
     lv_statement = extract_param( iv_params = is_message-params iv_name = 'statement' ).
     lv_condition = extract_param( iv_params = is_message-params iv_name = 'condition' ).
     lv_program = extract_param( iv_params = is_message-params iv_name = 'program' ).
+    lv_method = to_upper( extract_param( iv_params = is_message-params iv_name = 'method' ) ).
+    lv_include = extract_param( iv_params = is_message-params iv_name = 'include' ).
 
     IF lv_kind IS INITIAL.
       lv_kind = 'line'.
@@ -779,6 +784,30 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
             iv_message = |Cannot extract program name from URI: { lv_uri }|
           ).
           RETURN.
+        ENDIF.
+
+        " Resolve method name to include for class breakpoints
+        " This enables include-relative line numbers (line within method, not pool)
+        IF lv_method IS NOT INITIAL.
+          " Extract class name from program (remove =*CP suffix)
+          " Class pool format: ZCL_xxx===========CP (padded to 30 chars + CP)
+          lv_class = lv_program.
+          IF lv_class CP '*=*CP'.
+            " Find the position of the first '=' and extract class name
+            DATA lv_eq_pos TYPE i.
+            FIND '=' IN lv_class MATCH OFFSET lv_eq_pos.
+            IF lv_eq_pos > 0.
+              lv_class = lv_class(lv_eq_pos).
+            ENDIF.
+          ENDIF.
+          TRY.
+              DATA lo_incl_naming TYPE REF TO if_oo_class_incl_naming.
+              lo_incl_naming ?= cl_oo_include_naming=>get_instance_by_name( CONV seoclsname( lv_class ) ).
+              lv_include = lo_incl_naming->get_include_by_mtdname( CONV seocpdname( lv_method ) ).
+            CATCH cx_root INTO DATA(lx_naming).
+              " Fall back to no include if resolution fails
+              CLEAR lv_include.
+          ENDTRY.
         ENDIF.
       WHEN 'exception'.
         IF lv_exception IS INITIAL.
@@ -824,10 +853,19 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
 
         CASE lv_kind.
           WHEN 'line'.
-            lo_bp ?= lo_bp_services->create_line_breakpoint(
-              i_main_program = lv_program
-              i_line_nr      = lv_line
-            ).
+            " Use include-aware breakpoint if include is resolved
+            IF lv_include IS NOT INITIAL.
+              lo_bp ?= lo_bp_services->create_line_breakpoint(
+                i_main_program = lv_program
+                i_include      = lv_include
+                i_line_nr      = lv_line
+              ).
+            ELSE.
+              lo_bp ?= lo_bp_services->create_line_breakpoint(
+                i_main_program = lv_program
+                i_line_nr      = lv_line
+              ).
+            ENDIF.
 
           WHEN 'exception'.
             lo_bp ?= lo_bp_services->create_exception_breakpoint(
@@ -862,6 +900,8 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
           success = abap_true
           data    = |{ lv_brace_open }"breakpointId":"{ lv_bp_id }","kind":"{ lv_kind }","registered":true| &&
                     COND #( WHEN lv_program IS NOT INITIAL THEN |,"program":"{ escape_json( lv_program ) }"| ELSE '' ) &&
+                    COND #( WHEN lv_include IS NOT INITIAL THEN |,"include":"{ escape_json( lv_include ) }"| ELSE '' ) &&
+                    COND #( WHEN lv_method IS NOT INITIAL THEN |,"method":"{ escape_json( lv_method ) }"| ELSE '' ) &&
                     COND #( WHEN lv_uri IS NOT INITIAL THEN |,"uri":"{ escape_json( lv_uri ) }","line":{ lv_line }| ELSE '' ) &&
                     COND #( WHEN lv_exception IS NOT INITIAL THEN |,"exception":"{ escape_json( lv_exception ) }"| ELSE '' ) &&
                     COND #( WHEN lv_statement IS NOT INITIAL THEN |,"statement":"{ escape_json( lv_statement ) }"| ELSE '' ) &&

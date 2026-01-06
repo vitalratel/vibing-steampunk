@@ -293,14 +293,8 @@ func (c *DebugWebSocketClient) sendRequest(ctx context.Context, action string, p
 	}
 }
 
-// SetBreakpoint sets a breakpoint at the specified location.
-func (c *DebugWebSocketClient) SetBreakpoint(ctx context.Context, program string, line int) (string, error) {
-	params := map[string]interface{}{
-		"kind":    "line",
-		"program": program,
-		"line":    line,
-	}
-
+// setBreakpointInternal sends a breakpoint request and parses the response.
+func (c *DebugWebSocketClient) setBreakpointInternal(ctx context.Context, params map[string]interface{}) (string, error) {
 	resp, err := c.sendRequest(ctx, "setBreakpoint", params)
 	if err != nil {
 		return "", err
@@ -322,6 +316,52 @@ func (c *DebugWebSocketClient) SetBreakpoint(ctx context.Context, program string
 	}
 
 	return result.BreakpointID, nil
+}
+
+// SetLineBreakpoint sets a breakpoint at a specific line in a program.
+// For classes, program should be in class pool format: ZCL_TEST================CP
+// The line number is pool-absolute (the line in the consolidated class source).
+func (c *DebugWebSocketClient) SetLineBreakpoint(ctx context.Context, program string, line int) (string, error) {
+	params := map[string]interface{}{
+		"kind":    "line",
+		"program": program,
+		"line":    line,
+	}
+	return c.setBreakpointInternal(ctx, params)
+}
+
+// SetMethodBreakpoint sets a breakpoint at a specific line within a method.
+// For class methods, this uses include-relative line numbers (line 1 = first line of method).
+// The method name is used to resolve the correct include for the breakpoint.
+// Example: SetMethodBreakpoint(ctx, "ZCL_TEST================CP", "MY_METHOD", 5)
+func (c *DebugWebSocketClient) SetMethodBreakpoint(ctx context.Context, program, method string, line int) (string, error) {
+	params := map[string]interface{}{
+		"kind":    "line",
+		"program": program,
+		"method":  method,
+		"line":    line,
+	}
+	return c.setBreakpointInternal(ctx, params)
+}
+
+// SetStatementBreakpoint sets a breakpoint on a specific ABAP statement.
+// Example statements: "CALL FUNCTION", "SELECT", "LOOP", "CALL METHOD"
+func (c *DebugWebSocketClient) SetStatementBreakpoint(ctx context.Context, statement string) (string, error) {
+	params := map[string]interface{}{
+		"kind":      "statement",
+		"statement": statement,
+	}
+	return c.setBreakpointInternal(ctx, params)
+}
+
+// SetExceptionBreakpoint sets a breakpoint that triggers when an exception is raised.
+// Example exceptions: "CX_SY_ZERODIVIDE", "CX_SY_OPEN_SQL_DB"
+func (c *DebugWebSocketClient) SetExceptionBreakpoint(ctx context.Context, exception string) (string, error) {
+	params := map[string]interface{}{
+		"kind":      "exception",
+		"exception": exception,
+	}
+	return c.setBreakpointInternal(ctx, params)
 }
 
 // GetBreakpoints returns all active breakpoints.

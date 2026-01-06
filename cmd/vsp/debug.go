@@ -147,7 +147,7 @@ func runDebug(cmd *cobra.Command, args []string) error {
 	// Set initial breakpoint if specified
 	if debugProgram != "" && debugLine > 0 {
 		if wsConnected {
-			bpID, err := wsClient.SetBreakpoint(ctx, debugProgram, debugLine)
+			bpID, err := wsClient.SetLineBreakpoint(ctx, debugProgram, debugLine)
 			if err != nil {
 				return fmt.Errorf("failed to set breakpoint: %w", err)
 			}
@@ -510,7 +510,7 @@ func (s *debugSession) setBreakpoint(args []string) error {
 		ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 		defer cancel()
 
-		bpID, err := s.wsClient.SetBreakpoint(ctx, program, line)
+		bpID, err := s.wsClient.SetLineBreakpoint(ctx, program, line)
 		if err != nil {
 			return fmt.Errorf("set breakpoint failed: %w", err)
 		}
