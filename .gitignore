@@ -48,8 +48,14 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
+
+# vsp config files (contain credentials)
+.vsp.json
+.vsp-systems.json
+.vsp/
 
 # Session summaries (may contain credentials)
 *SESSION-SUMMARY*
 abap-adt-api/
-.vsp.json
