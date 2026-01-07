@@ -1,0 +1,367 @@
+package adt
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// BaseWebSocketClient provides common WebSocket functionality for ZADT_VSP connections.
+// Embed this in domain-specific clients (Debug, AMDP, etc.).
+type BaseWebSocketClient struct {
+	baseURL  string
+	client   string
+	user     string
+	password string
+	insecure bool
+
+	conn      *websocket.Conn
+	sessionID string
+	mu        sync.RWMutex
+
+	// Request/response handling
+	msgID     atomic.Int64
+	pending   map[string]chan *WSResponse
+	pendingMu sync.Mutex
+
+	// Welcome signal
+	welcomeCh chan struct{}
+
+	// Connection state
+	connected bool
+
+	// Optional callback when connection is lost
+	onDisconnect func()
+}
+
+// NewBaseWebSocketClient creates a new base WebSocket client.
+func NewBaseWebSocketClient(baseURL, client, user, password string, insecure bool) *BaseWebSocketClient {
+	return &BaseWebSocketClient{
+		baseURL:   baseURL,
+		client:    client,
+		user:      user,
+		password:  password,
+		insecure:  insecure,
+		pending:   make(map[string]chan *WSResponse),
+		welcomeCh: make(chan struct{}, 1),
+	}
+}
+
+// Connect establishes WebSocket connection to ZADT_VSP.
+func (c *BaseWebSocketClient) Connect(ctx context.Context) error {
+	c.mu.Lock()
+	if c.conn != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("already connected")
+	}
+
+	// Build WebSocket URL
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	scheme := "ws"
+	if u.Scheme == "https" {
+		scheme = "wss"
+	}
+
+	wsURL := fmt.Sprintf("%s://%s/sap/bc/apc/sap/zadt_vsp?sap-client=%s", scheme, u.Host, c.client)
+
+	// Create dialer with auth and TLS config
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 30 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: c.insecure,
+		},
+	}
+
+	// Add basic auth header
+	header := http.Header{}
+	header.Set("Authorization", basicAuth(c.user, c.password))
+
+	conn, _, err := dialer.DialContext(ctx, wsURL, header)
+	if err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("WebSocket connection failed: %w", err)
+	}
+
+	c.conn = conn
+	c.connected = true
+	c.mu.Unlock()
+
+	// Start message reader goroutine
+	go c.readMessages()
+
+	// Wait for welcome message
+	select {
+	case <-c.welcomeCh:
+		return nil
+	case <-time.After(5 * time.Second):
+		c.Close()
+		return fmt.Errorf("timeout waiting for welcome message")
+	case <-ctx.Done():
+		c.Close()
+		return ctx.Err()
+	}
+}
+
+// Close closes the WebSocket connection.
+func (c *BaseWebSocketClient) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn != nil {
+		err := c.conn.Close()
+		c.conn = nil
+		c.connected = false
+		return err
+	}
+	return nil
+}
+
+// IsConnected returns whether the client is connected.
+func (c *BaseWebSocketClient) IsConnected() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connected
+}
+
+// GetUser returns the username.
+func (c *BaseWebSocketClient) GetUser() string {
+	return c.user
+}
+
+// readMessages reads messages from WebSocket and routes them.
+func (c *BaseWebSocketClient) readMessages() {
+	for {
+		c.mu.RLock()
+		conn := c.conn
+		c.mu.RUnlock()
+
+		if conn == nil {
+			return
+		}
+
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			c.mu.Lock()
+			c.conn = nil
+			c.connected = false
+			onDisconnect := c.onDisconnect
+			c.mu.Unlock()
+
+			// Call disconnect callback if set
+			if onDisconnect != nil {
+				onDisconnect()
+			}
+			return
+		}
+
+		var resp WSResponse
+		if err := json.Unmarshal(message, &resp); err != nil {
+			continue
+		}
+
+		// Check if this is a response to a pending request
+		c.pendingMu.Lock()
+		if ch, ok := c.pending[resp.ID]; ok {
+			ch <- &resp
+			delete(c.pending, resp.ID)
+			c.pendingMu.Unlock()
+			continue
+		}
+		c.pendingMu.Unlock()
+
+		// Handle welcome message
+		if resp.ID == "welcome" {
+			var welcomeData struct {
+				Session string   `json:"session"`
+				Version string   `json:"version"`
+				Domains []string `json:"domains"`
+			}
+			if err := json.Unmarshal(resp.Data, &welcomeData); err == nil {
+				c.mu.Lock()
+				c.sessionID = welcomeData.Session
+				c.mu.Unlock()
+			}
+			select {
+			case c.welcomeCh <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// SendDomainRequest sends a request to any domain and waits for response.
+func (c *BaseWebSocketClient) SendDomainRequest(ctx context.Context, domain, action string, params map[string]any, timeout time.Duration) (*WSResponse, error) {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+
+	if conn == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	id := fmt.Sprintf("%s_%d", domain, c.msgID.Add(1))
+
+	msg := WSMessage{
+		ID:      id,
+		Domain:  domain,
+		Action:  action,
+		Params:  params,
+		Timeout: int(timeout.Milliseconds()),
+	}
+
+	respCh := make(chan *WSResponse, 1)
+	c.pendingMu.Lock()
+	c.pending[id] = respCh
+	c.pendingMu.Unlock()
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, err
+	}
+
+	c.mu.Lock()
+	err = c.conn.WriteMessage(websocket.TextMessage, data)
+	c.mu.Unlock()
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, err
+	}
+
+	select {
+	case resp := <-respCh:
+		return resp, nil
+	case <-ctx.Done():
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, ctx.Err()
+	case <-time.After(timeout):
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("request timeout")
+	}
+}
+
+// SendRawRequest sends a raw message (for domains that use different format).
+func (c *BaseWebSocketClient) SendRawRequest(ctx context.Context, id string, rawMsg map[string]any, timeout time.Duration) (*WSResponse, error) {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+
+	if conn == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	respCh := make(chan *WSResponse, 1)
+	c.pendingMu.Lock()
+	c.pending[id] = respCh
+	c.pendingMu.Unlock()
+
+	data, err := json.Marshal(rawMsg)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, err
+	}
+
+	c.mu.Lock()
+	err = c.conn.WriteMessage(websocket.TextMessage, data)
+	c.mu.Unlock()
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, err
+	}
+
+	select {
+	case resp := <-respCh:
+		return resp, nil
+	case <-ctx.Done():
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, ctx.Err()
+	case <-time.After(timeout):
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+		return nil, fmt.Errorf("request timeout")
+	}
+}
+
+// GenerateID generates a unique message ID for a domain.
+func (c *BaseWebSocketClient) GenerateID(prefix string) string {
+	return fmt.Sprintf("%s_%d", prefix, c.msgID.Add(1))
+}
+
+// RegisterPending registers a channel for a pending request.
+func (c *BaseWebSocketClient) RegisterPending(id string, ch chan *WSResponse) {
+	c.pendingMu.Lock()
+	c.pending[id] = ch
+	c.pendingMu.Unlock()
+}
+
+// UnregisterPending removes a pending request channel.
+func (c *BaseWebSocketClient) UnregisterPending(id string) {
+	c.pendingMu.Lock()
+	delete(c.pending, id)
+	c.pendingMu.Unlock()
+}
+
+// WriteMessage writes a message to the WebSocket connection.
+func (c *BaseWebSocketClient) WriteMessage(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	return c.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// basicAuth creates basic auth header value.
+func basicAuth(user, password string) string {
+	auth := user + ":" + password
+	return "Basic " + base64Encode([]byte(auth))
+}
+
+// base64Encode encodes bytes to base64 string.
+func base64Encode(data []byte) string {
+	const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var result []byte
+	for i := 0; i < len(data); i += 3 {
+		var b uint32
+		remaining := len(data) - i
+		if remaining >= 3 {
+			b = uint32(data[i])<<16 | uint32(data[i+1])<<8 | uint32(data[i+2])
+			result = append(result, base64Chars[b>>18&0x3F], base64Chars[b>>12&0x3F], base64Chars[b>>6&0x3F], base64Chars[b&0x3F])
+		} else if remaining == 2 {
+			b = uint32(data[i])<<16 | uint32(data[i+1])<<8
+			result = append(result, base64Chars[b>>18&0x3F], base64Chars[b>>12&0x3F], base64Chars[b>>6&0x3F], '=')
+		} else {
+			b = uint32(data[i]) << 16
+			result = append(result, base64Chars[b>>18&0x3F], base64Chars[b>>12&0x3F], '=', '=')
+		}
+	}
+	return string(result)
+}

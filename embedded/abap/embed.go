@@ -9,6 +9,12 @@ import _ "embed"
 //go:embed zif_vsp_service.intf.abap
 var ZifVspService string
 
+//go:embed zcl_vsp_utils.clas.abap
+var ZclVspUtils string
+
+//go:embed zadt_cl_tadir_move.clas.abap
+var ZadtClTadirMove string
+
 //go:embed zcl_vsp_rfc_service.clas.abap
 var ZclVspRfcService string
 
@@ -20,6 +26,9 @@ var ZclVspAmdpService string
 
 //go:embed zcl_vsp_git_service.clas.abap
 var ZclVspGitService string
+
+//go:embed zcl_vsp_report_service.clas.abap
+var ZclVspReportService string
 
 //go:embed zcl_vsp_apc_handler.clas.abap
 var ZclVspApcHandler string
@@ -41,6 +50,20 @@ func GetObjects() []ObjectInfo {
 			Name:        "ZIF_VSP_SERVICE",
 			Source:      ZifVspService,
 			Description: "Service interface for WebSocket domain handlers",
+			Optional:    false,
+		},
+		{
+			Type:        "CLAS",
+			Name:        "ZCL_VSP_UTILS",
+			Source:      ZclVspUtils,
+			Description: "Shared utilities for JSON and parameter handling",
+			Optional:    false,
+		},
+		{
+			Type:        "CLAS",
+			Name:        "ZADT_CL_TADIR_MOVE",
+			Source:      ZadtClTadirMove,
+			Description: "Helper class for moving objects between packages",
 			Optional:    false,
 		},
 		{
@@ -70,6 +93,13 @@ func GetObjects() []ObjectInfo {
 			Source:      ZclVspGitService,
 			Description: "Git domain - abapGit export (requires abapGit)",
 			Optional:    true, // Requires abapGit on SAP system
+		},
+		{
+			Type:        "CLAS",
+			Name:        "ZCL_VSP_REPORT_SERVICE",
+			Source:      ZclVspReportService,
+			Description: "Report domain - background job execution with spool output",
+			Optional:    false,
 		},
 		{
 			Type:        "CLAS",

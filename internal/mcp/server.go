@@ -338,6 +338,7 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 		"GetBreakpoints":   true, // List active breakpoints
 		"DeleteBreakpoint": true, // Remove breakpoint
 		"CallRFC":          true, // Call function module via WebSocket (trigger execution)
+		"MoveObject":       true, // Move object to different package
 
 		// Debugger Session (6)
 		"DebuggerListen":       true, // Wait for debuggee to hit breakpoint
@@ -917,6 +918,25 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 				mcp.Description("JSON object with function parameters (e.g., '{\"IV_PARAM\":\"value\"}')"),
 			),
 		), s.handleCallRFC)
+	}
+
+	// MoveObject - Move object to different package via WebSocket
+	if shouldRegister("MoveObject") {
+		s.mcpServer.AddTool(mcp.NewTool("MoveObject",
+			mcp.WithDescription("Move an ABAP object to a different package. Uses ZADT_VSP WebSocket to call TR_TADIR_INTERFACE. Requires ZADT_VSP deployed."),
+			mcp.WithString("object_type",
+				mcp.Required(),
+				mcp.Description("Object type: CLAS, PROG, INTF, FUGR, TABL, etc."),
+			),
+			mcp.WithString("object_name",
+				mcp.Required(),
+				mcp.Description("Name of the object to move (e.g., 'ZCL_TEST')"),
+			),
+			mcp.WithString("new_package",
+				mcp.Required(),
+				mcp.Description("Target package (e.g., '$ZRAY', 'ZPACKAGE')"),
+			),
+		), s.handleMoveObject)
 	}
 
 	// DebuggerListen
@@ -2169,7 +2189,7 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 	// RunReport
 	if shouldRegister("RunReport") {
 		s.mcpServer.AddTool(mcp.NewTool("RunReport",
-			mcp.WithDescription("Execute an ABAP selection-screen report with parameters or variant. Can capture ALV output as structured data. Requires ZADT_VSP WebSocket handler deployed."),
+			mcp.WithDescription("Execute an ABAP selection-screen report with parameters or variant. Runs as background job and returns spool output. Requires ZADT_VSP WebSocket handler deployed."),
 			mcp.WithString("report",
 				mcp.Description("Report program name (e.g., 'RFITEMGL', 'ZREPORT_TEST')"),
 				mcp.Required(),
@@ -2179,12 +2199,6 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 			),
 			mcp.WithString("params",
 				mcp.Description("JSON object with selection screen parameters (e.g., '{\"P_BUKRS\":\"1000\",\"S_KUNNR\":{\"SIGN\":\"I\",\"OPTION\":\"EQ\",\"LOW\":\"0000001000\"}}'). Keys are parameter names."),
-			),
-			mcp.WithBoolean("capture_alv",
-				mcp.Description("If true, capture ALV grid output as structured data (default: false)"),
-			),
-			mcp.WithNumber("max_rows",
-				mcp.Description("Maximum ALV rows to return when capturing (default: 1000)"),
 			),
 		), s.handleRunReport)
 	}
@@ -2202,12 +2216,6 @@ func (s *Server) registerTools(mode string, disabledGroups string) {
 			),
 			mcp.WithString("params",
 				mcp.Description("JSON object with selection screen parameters"),
-			),
-			mcp.WithBoolean("capture_alv",
-				mcp.Description("Capture ALV output (default: false)"),
-			),
-			mcp.WithNumber("max_rows",
-				mcp.Description("Maximum ALV rows (default: 1000)"),
 			),
 		), s.handleRunReportAsync)
 	}

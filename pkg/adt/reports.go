@@ -9,35 +9,38 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+
 // RunReportParams contains parameters for report execution.
+// Reports run as background jobs and output to spool (APC-safe).
 type RunReportParams struct {
-	Report     string            `json:"report"`
-	Variant    string            `json:"variant,omitempty"`
-	Params     map[string]string `json:"params,omitempty"`
-	CaptureALV bool              `json:"capture_alv"`
-	MaxRows    int               `json:"max_rows,omitempty"`
+	Report  string            `json:"report"`
+	Variant string            `json:"variant,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
 }
 
 // RunReportResult contains report execution results.
+// Reports run as background jobs - use GetJobStatus to poll completion.
 type RunReportResult struct {
-	Status      string      `json:"status"`
-	Report      string      `json:"report"`
-	RuntimeMs   int         `json:"runtime_ms"`
-	ALVCaptured bool        `json:"alv_captured"`
-	Columns     []ALVColumn `json:"columns,omitempty"`
-	Rows        []ALVRow    `json:"rows,omitempty"`
-	TotalRows   int         `json:"total_rows,omitempty"`
-	Truncated   bool        `json:"truncated,omitempty"`
+	Status   string `json:"status"`
+	Report   string `json:"report"`
+	JobName  string `json:"jobname"`
+	JobCount string `json:"jobcount"`
 }
 
-// ALVColumn describes an ALV column.
-type ALVColumn struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+// JobStatusResult contains job status information.
+type JobStatusResult struct {
+	JobName  string   `json:"jobname"`
+	JobCount string   `json:"jobcount"`
+	Status   string   `json:"status"` // scheduled, running, finished, aborted
+	SpoolIDs []string `json:"spool_ids,omitempty"`
 }
 
-// ALVRow is a map of column name to value.
-type ALVRow map[string]string
+// SpoolOutputResult contains spool output data.
+type SpoolOutputResult struct {
+	SpoolID string `json:"spool_id"`
+	Lines   int    `json:"lines"`
+	Output  string `json:"output"`
+}
 
 // TextElements contains program text elements.
 type TextElements struct {
@@ -80,19 +83,16 @@ type GetVariantsResult struct {
 }
 
 // RunReport executes an ABAP report via WebSocket (ZADT_VSP report domain).
+// Report runs as background job - returns job info for polling.
 func (c *AMDPWebSocketClient) RunReport(ctx context.Context, params RunReportParams) (*RunReportResult, error) {
 	reqParams := map[string]interface{}{
-		"report":      params.Report,
-		"capture_alv": fmt.Sprintf("%t", params.CaptureALV),
+		"report": params.Report,
 	}
 	if params.Variant != "" {
 		reqParams["variant"] = params.Variant
 	}
-	if params.Params != nil && len(params.Params) > 0 {
+	if len(params.Params) > 0 {
 		reqParams["params"] = params.Params
-	}
-	if params.MaxRows > 0 {
-		reqParams["max_rows"] = fmt.Sprintf("%d", params.MaxRows)
 	}
 
 	resp, err := c.sendReportRequest(ctx, "runReport", reqParams)
@@ -179,6 +179,49 @@ func (c *AMDPWebSocketClient) GetVariants(ctx context.Context, report string) (*
 	}
 
 	var result GetVariantsResult
+	if len(resp.Data) > 0 {
+		if err := json.Unmarshal(resp.Data, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse result: %w", err)
+		}
+	}
+
+	return &result, nil
+}
+
+// GetJobStatus retrieves job status via WebSocket.
+func (c *AMDPWebSocketClient) GetJobStatus(ctx context.Context, jobName, jobCount string) (*JobStatusResult, error) {
+	params := map[string]interface{}{
+		"jobname":  jobName,
+		"jobcount": jobCount,
+	}
+
+	resp, err := c.sendReportRequest(ctx, "getJobStatus", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var result JobStatusResult
+	if len(resp.Data) > 0 {
+		if err := json.Unmarshal(resp.Data, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse result: %w", err)
+		}
+	}
+
+	return &result, nil
+}
+
+// GetSpoolOutput retrieves spool output by ID via WebSocket.
+func (c *AMDPWebSocketClient) GetSpoolOutput(ctx context.Context, spoolID string) (*SpoolOutputResult, error) {
+	params := map[string]interface{}{
+		"spool_id": spoolID,
+	}
+
+	resp, err := c.sendReportRequest(ctx, "getSpoolOutput", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var result SpoolOutputResult
 	if len(resp.Data) > 0 {
 		if err := json.Unmarshal(resp.Data, &result); err != nil {
 			return nil, fmt.Errorf("failed to parse result: %w", err)

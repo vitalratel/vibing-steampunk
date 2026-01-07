@@ -42,10 +42,6 @@ CLASS zcl_vsp_apc_handler DEFINITION
       IMPORTING is_message         TYPE zif_vsp_service=>ty_message
       RETURNING VALUE(rs_response) TYPE zif_vsp_service=>ty_response.
 
-    METHODS escape_json
-      IMPORTING iv_string         TYPE string
-      RETURNING VALUE(rv_escaped) TYPE string.
-
 ENDCLASS.
 
 
@@ -71,9 +67,11 @@ CLASS zcl_vsp_apc_handler IMPLEMENTATION.
     ENDTRY.
     mv_session_id = lv_uuid.
 
-    DATA(lv_brace_open) = '{'.
-    DATA(lv_brace_close) = '}'.
-    DATA(lv_data) = |{ lv_brace_open }"session":"{ mv_session_id }","version":"2.3.0","domains":["rfc","debug","amdp","git","report"]{ lv_brace_close }|.
+    DATA(lv_data) = zcl_vsp_utils=>json_obj( zcl_vsp_utils=>json_join( VALUE #(
+      ( zcl_vsp_utils=>json_str( iv_key = 'session' iv_value = mv_session_id ) )
+      ( zcl_vsp_utils=>json_str( iv_key = 'version' iv_value = '2.3.0' ) )
+      ( |"domains":["rfc","debug","amdp","git","report"]| )
+    ) ) ).
 
     send_response( VALUE #(
       id      = 'welcome'
@@ -159,21 +157,19 @@ CLASS zcl_vsp_apc_handler IMPLEMENTATION.
     TRY.
         DATA(lo_message) = mo_message_manager->create_message( ).
 
-        DATA(lv_brace_open) = '{'.
-        DATA(lv_brace_close) = '}'.
-        DATA(lv_success) = COND string( WHEN is_response-success = abap_true THEN 'true' ELSE 'false' ).
-
-        DATA(lv_json) = |{ lv_brace_open }"id":"{ is_response-id }","success":{ lv_success }|.
+        DATA lt_items TYPE string_table.
+        APPEND zcl_vsp_utils=>json_str( iv_key = 'id' iv_value = is_response-id ) TO lt_items.
+        APPEND zcl_vsp_utils=>json_bool( iv_key = 'success' iv_value = is_response-success ) TO lt_items.
 
         IF is_response-data IS NOT INITIAL.
-          lv_json = |{ lv_json },"data":{ is_response-data }|.
+          APPEND |"data":{ is_response-data }| TO lt_items.
         ENDIF.
 
         IF is_response-error IS NOT INITIAL.
-          lv_json = |{ lv_json },"error":{ is_response-error }|.
+          APPEND |"error":{ is_response-error }| TO lt_items.
         ENDIF.
 
-        lv_json = |{ lv_json }{ lv_brace_close }|.
+        DATA(lv_json) = zcl_vsp_utils=>json_obj( zcl_vsp_utils=>json_join( lt_items ) ).
 
         lo_message->set_text( lv_json ).
         mo_message_manager->send( lo_message ).
@@ -183,14 +179,10 @@ CLASS zcl_vsp_apc_handler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD send_error.
-    DATA(lv_brace_open) = '{'.
-    DATA(lv_brace_close) = '}'.
-    DATA(lv_escaped_msg) = escape_json( iv_message ).
-
-    send_response( VALUE #(
-      id      = iv_id
-      success = abap_false
-      error   = |{ lv_brace_open }"code":"{ iv_code }","message":"{ lv_escaped_msg }"{ lv_brace_close }|
+    send_response( zcl_vsp_utils=>build_error(
+      iv_id      = iv_id
+      iv_code    = iv_code
+      iv_message = iv_message
     ) ).
   ENDMETHOD.
 
@@ -205,39 +197,36 @@ CLASS zcl_vsp_apc_handler IMPLEMENTATION.
 
     LOOP AT gt_services INTO DATA(lo_service).
       IF lo_service->get_domain( ) = is_message-domain.
-        rs_response = lo_service->handle_message(
-          iv_session_id = mv_session_id
-          is_message    = is_message
-        ).
+        TRY.
+            rs_response = lo_service->handle_message(
+              iv_session_id = mv_session_id
+              is_message    = is_message
+            ).
+          CATCH cx_root INTO DATA(lx_service_error).
+            DATA(lv_err_msg) = zcl_vsp_utils=>escape_json( lx_service_error->get_text( ) ).
+            rs_response = VALUE #(
+              id      = is_message-id
+              success = abap_false
+              error   = `{"code":"SERVICE_EXCEPTION","message":"` && lv_err_msg && `"}`
+            ).
+        ENDTRY.
         RETURN.
       ENDIF.
     ENDLOOP.
 
-    DATA(lv_brace_open) = '{'.
-    DATA(lv_brace_close) = '}'.
-    rs_response = VALUE #(
-      id      = is_message-id
-      success = abap_false
-      error   = |{ lv_brace_open }"code":"UNKNOWN_DOMAIN","message":"Domain '{ is_message-domain }' not found"{ lv_brace_close }|
+    rs_response = zcl_vsp_utils=>build_error(
+      iv_id      = is_message-id
+      iv_code    = 'UNKNOWN_DOMAIN'
+      iv_message = |Domain '{ is_message-domain }' not found|
     ).
   ENDMETHOD.
 
   METHOD handle_ping.
-    DATA(lv_brace_open) = '{'.
-    DATA(lv_brace_close) = '}'.
-    rs_response = VALUE #(
-      id      = is_message-id
-      success = abap_true
-      data    = |{ lv_brace_open }"pong":true,"timestamp":"{ sy-datum }T{ sy-uzeit }"{ lv_brace_close }|
-    ).
-  ENDMETHOD.
-
-  METHOD escape_json.
-    rv_escaped = iv_string.
-    REPLACE ALL OCCURRENCES OF '\' IN rv_escaped WITH '\\'.
-    REPLACE ALL OCCURRENCES OF '"' IN rv_escaped WITH '\"'.
-    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN rv_escaped WITH '\n'.
-    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN rv_escaped WITH '\n'.
+    DATA(lv_data) = zcl_vsp_utils=>json_obj( zcl_vsp_utils=>json_join( VALUE #(
+      ( zcl_vsp_utils=>json_bool( iv_key = 'pong' iv_value = abap_true ) )
+      ( zcl_vsp_utils=>json_str( iv_key = 'timestamp' iv_value = |{ sy-datum }T{ sy-uzeit }| ) )
+    ) ) ).
+    rs_response = zcl_vsp_utils=>build_success( iv_id = is_message-id iv_data = lv_data ).
   ENDMETHOD.
 
 ENDCLASS.

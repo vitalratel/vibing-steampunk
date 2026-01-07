@@ -367,3 +367,37 @@ func (s *Server) handleDeleteObject(ctx context.Context, request mcp.CallToolReq
 
 	return mcp.NewToolResultText("Object deleted successfully"), nil
 }
+
+func (s *Server) handleMoveObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	objectType, ok := request.Params.Arguments["object_type"].(string)
+	if !ok || objectType == "" {
+		return newToolResultError("object_type is required"), nil
+	}
+
+	objectName, ok := request.Params.Arguments["object_name"].(string)
+	if !ok || objectName == "" {
+		return newToolResultError("object_name is required"), nil
+	}
+
+	newPackage, ok := request.Params.Arguments["new_package"].(string)
+	if !ok || newPackage == "" {
+		return newToolResultError("new_package is required"), nil
+	}
+
+	// Ensure WebSocket client is connected
+	if err := s.ensureDebugWSClient(ctx); err != nil {
+		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v. Ensure ZADT_VSP is deployed and SAPC/SICF are configured.", err)), nil
+	}
+
+	result, err := s.debugWSClient.MoveObject(ctx, objectType, objectName, newPackage)
+	if err != nil {
+		return newToolResultError(fmt.Sprintf("MoveObject failed: %v", err)), nil
+	}
+
+	// Format result
+	if result.Success {
+		return mcp.NewToolResultText(fmt.Sprintf("Object moved successfully.\n\nObject: %s %s\nNew Package: %s\nMessage: %s",
+			result.Object, result.ObjName, result.NewPackage, result.Message)), nil
+	}
+	return newToolResultError(fmt.Sprintf("Move failed: %s", result.Message)), nil
+}
