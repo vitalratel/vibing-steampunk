@@ -8,42 +8,45 @@ import (
 	"strings"
 )
 
-// Common XML namespace prefixes used in ADT responses.
-// These are stripped before parsing for simpler struct tags.
-var adtXMLPrefixes = []string{
-	"adtcore:", "aunit:", "atc:", "atcworklist:", "atcobject:", "atcfinding:",
-	"atccust:", "chkrun:", "ioc:", "blue:", "abapsource:",
-}
-
-// Common XML namespace declarations that may need stripping.
-var adtXMLNamespaceDeclarations = []string{
-	` xmlns:aunit="http://www.sap.com/adt/aunit"`,
-	` xmlns:adtcore="http://www.sap.com/adt/core"`,
-	` xmlns:atc="http://www.sap.com/adt/atc"`,
-}
-
 // Package-level compiled regex for parsing ADT location fragments.
 // Matches patterns like: #start=10,5 or /path#start=10,5
 var locationFragmentRegex = regexp.MustCompile(`#start=(\d+),(\d+)`)
 
-// StripXMLNamespacePrefixes removes common ADT XML namespace prefixes from XML data.
-// This simplifies parsing by allowing Go struct tags without namespace prefixes.
-// Usage: xml.Unmarshal([]byte(StripXMLNamespacePrefixes(data)), &result)
-func StripXMLNamespacePrefixes(data []byte) string {
-	result := string(data)
-	for _, prefix := range adtXMLPrefixes {
-		result = strings.ReplaceAll(result, prefix, "")
+// StripXMLNamespaces removes specified namespace prefixes from XML for easier parsing.
+// Callers explicitly specify which prefixes to strip, making behavior predictable.
+// Usage: xml.Unmarshal([]byte(StripXMLNamespaces(data, "dbg:", "adtcore:")), &result)
+func StripXMLNamespaces(data string, prefixes ...string) string {
+	for _, prefix := range prefixes {
+		data = strings.ReplaceAll(data, prefix, "")
 	}
-	return result
+	return data
+}
+
+// XMLEscape escapes special XML characters for safe inclusion in XML content.
+func XMLEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
 }
 
 // StripXMLNamespaceDeclarations removes common xmlns declarations from XML string.
-// Use after StripXMLNamespacePrefixes when namespace declarations cause parsing issues.
-func StripXMLNamespaceDeclarations(xml string) string {
-	for _, decl := range adtXMLNamespaceDeclarations {
-		xml = strings.ReplaceAll(xml, decl, "")
+// Use when namespace declarations cause parsing issues.
+func StripXMLNamespaceDeclarations(xmlStr string, declarations ...string) string {
+	// Default declarations if none provided
+	if len(declarations) == 0 {
+		declarations = []string{
+			` xmlns:aunit="http://www.sap.com/adt/aunit"`,
+			` xmlns:adtcore="http://www.sap.com/adt/core"`,
+			` xmlns:atc="http://www.sap.com/adt/atc"`,
+		}
 	}
-	return xml
+	for _, decl := range declarations {
+		xmlStr = strings.ReplaceAll(xmlStr, decl, "")
+	}
+	return xmlStr
 }
 
 // ParseLocationFragment extracts line and column from ADT URI location fragment.
@@ -153,8 +156,8 @@ type PackageContent struct {
 	Name         string          `xml:"name,attr"`
 	SubPackages  []string        `json:"subPackages,omitempty"`
 	Objects      []PackageObject `json:"objects,omitempty"`
-	TotalObjects int             `json:"totalObjects"`           // Total count before limiting
-	Truncated    bool            `json:"truncated,omitempty"`    // True if objects were limited
+	TotalObjects int             `json:"totalObjects"`        // Total count before limiting
+	Truncated    bool            `json:"truncated,omitempty"` // True if objects were limited
 }
 
 // PackageObject represents an object within a package.

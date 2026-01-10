@@ -24,33 +24,19 @@ func (s *Server) routeInstallAction(ctx context.Context, action, _, _ string, pa
 		return nil, false, nil
 	}
 
-	systemType, _ := params["type"].(string)
+	systemType := getStr(params, "type")
 	switch systemType {
 	case "install_zadt_vsp":
 		args := map[string]any{}
-		if pkg, ok := params["package"].(string); ok {
-			args["package"] = pkg
-		}
-		if skipGit, ok := params["skip_git_service"].(bool); ok {
-			args["skip_git_service"] = skipGit
-		}
-		if checkOnly, ok := params["check_only"].(bool); ok {
-			args["check_only"] = checkOnly
-		}
+		copyOptional(args, params, "package")
+		copyOptionalBool(args, params, "skip_git_service", "check_only")
 		result, err := s.handleInstallZADTVSP(ctx, newRequest(args))
 		return result, true, err
 
 	case "install_abapgit":
 		args := map[string]any{}
-		if ed, ok := params["edition"].(string); ok {
-			args["edition"] = ed
-		}
-		if pkg, ok := params["package"].(string); ok {
-			args["package"] = pkg
-		}
-		if checkOnly, ok := params["check_only"].(bool); ok {
-			args["check_only"] = checkOnly
-		}
+		copyOptional(args, params, "edition", "package")
+		copyOptionalBool(args, params, "check_only")
 		result, err := s.handleInstallAbapGit(ctx, newRequest(args))
 		return result, true, err
 
@@ -60,12 +46,7 @@ func (s *Server) routeInstallAction(ctx context.Context, action, _, _ string, pa
 
 	case "install_dummy_test":
 		args := map[string]any{}
-		if checkOnly, ok := params["check_only"].(bool); ok {
-			args["check_only"] = checkOnly
-		}
-		if cleanup, ok := params["cleanup"].(bool); ok {
-			args["cleanup"] = cleanup
-		}
+		copyOptionalBool(args, params, "check_only", "cleanup")
 		result, err := s.handleInstallDummyTest(ctx, newRequest(args))
 		return result, true, err
 	}
@@ -82,15 +63,9 @@ func (s *Server) handleInstallDummyTest(ctx context.Context, request mcp.CallToo
 		testClass     = "ZCL_DUMMY_TEST"
 	)
 
-	checkOnly := false
-	if check, ok := request.Params.Arguments["check_only"].(bool); ok {
-		checkOnly = check
-	}
-
-	cleanup := false
-	if cl, ok := request.Params.Arguments["cleanup"].(bool); ok {
-		cleanup = cl
-	}
+	args := request.Params.Arguments
+	checkOnly := getBool(args, "check_only", false)
+	cleanup := getBool(args, "cleanup", false)
 
 	var sb strings.Builder
 	sb.WriteString("InstallDummyTest - Workflow Verification\n")
@@ -338,23 +313,16 @@ ENDCLASS.`
 }
 
 func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// Parse parameters
-	packageName := "$ZADT_VSP"
-	if pkg, ok := request.Params.Arguments["package"].(string); ok && pkg != "" {
-		packageName = strings.ToUpper(pkg)
+	args := request.Params.Arguments
+	packageName := getStr(args, "package")
+	if packageName == "" {
+		packageName = "$ZADT_VSP"
+	} else {
+		packageName = strings.ToUpper(packageName)
 	}
+	skipGitService := getBool(args, "skip_git_service", false)
+	checkOnly := getBool(args, "check_only", false)
 
-	skipGitService := false
-	if skip, ok := request.Params.Arguments["skip_git_service"].(bool); ok {
-		skipGitService = skip
-	}
-
-	checkOnly := false
-	if check, ok := request.Params.Arguments["check_only"].(bool); ok {
-		checkOnly = check
-	}
-
-	// Validate package name
 	if !strings.HasPrefix(packageName, "$") {
 		return newToolResultError("Package name must start with $ (local package)"), nil
 	}
@@ -528,28 +496,16 @@ func (s *Server) handleListDependencies(ctx context.Context, request mcp.CallToo
 }
 
 func (s *Server) handleInstallAbapGit(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// Parse parameters
-	edition := "standalone"
-	if ed, ok := request.Params.Arguments["edition"].(string); ok && ed != "" {
-		edition = strings.ToLower(ed)
+	args := request.Params.Arguments
+	edition := strings.ToLower(getStr(args, "edition"))
+	if edition == "" {
+		edition = "standalone"
 	}
-
-	packageName := ""
-	if pkg, ok := request.Params.Arguments["package"].(string); ok && pkg != "" {
-		packageName = strings.ToUpper(pkg)
-	}
-
-	checkOnly := false
-	if check, ok := request.Params.Arguments["check_only"].(bool); ok {
-		checkOnly = check
-	}
-
-	// Validate edition
 	if edition != "standalone" && edition != "dev" {
 		return newToolResultError("Invalid edition. Use 'standalone' or 'dev'"), nil
 	}
 
-	// Set default package based on edition
+	packageName := strings.ToUpper(getStr(args, "package"))
 	if packageName == "" {
 		if edition == "standalone" {
 			packageName = "$ABAPGIT"
@@ -557,11 +513,11 @@ func (s *Server) handleInstallAbapGit(ctx context.Context, request mcp.CallToolR
 			packageName = "$ZGIT_DEV"
 		}
 	}
-
-	// Validate package name
 	if !strings.HasPrefix(packageName, "$") {
 		return newToolResultError("Package name must start with $ (local package)"), nil
 	}
+
+	checkOnly := getBool(args, "check_only", false)
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Install abapGit (%s edition)\n", edition)

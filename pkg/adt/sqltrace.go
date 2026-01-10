@@ -90,7 +90,7 @@ func parseSQLTraceState(data []byte) (*SQLTraceState, error) {
 
 	var maxRecords int
 	if state.MaxRecords != "" {
-		fmt.Sscanf(state.MaxRecords, "%d", &maxRecords)
+		_, _ = fmt.Sscanf(state.MaxRecords, "%d", &maxRecords)
 	}
 
 	return &SQLTraceState{
@@ -142,10 +142,10 @@ func parseSQLTraceDirectory(data []byte) ([]SQLTraceEntry, error) {
 		var recordCount int
 		var size int64
 		if entry.Content.Trace.RecordCount != "" {
-			fmt.Sscanf(entry.Content.Trace.RecordCount, "%d", &recordCount)
+			_, _ = fmt.Sscanf(entry.Content.Trace.RecordCount, "%d", &recordCount)
 		}
 		if entry.Content.Trace.Size != "" {
-			fmt.Sscanf(entry.Content.Trace.Size, "%d", &size)
+			_, _ = fmt.Sscanf(entry.Content.Trace.Size, "%d", &size)
 		}
 
 		trace := SQLTraceEntry{

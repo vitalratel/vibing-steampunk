@@ -128,7 +128,7 @@ func parseUnitTestResult(data []byte) (*UnitTestResult, error) {
 	}
 
 	// Strip namespace prefixes and declarations for consistent parsing
-	xmlStr := StripXMLNamespaceDeclarations(StripXMLNamespacePrefixes(data))
+	xmlStr := StripXMLNamespaceDeclarations(StripXMLNamespaces(string(data), "aunit:", "adtcore:"))
 
 	type stackEntry struct {
 		URI         string `xml:"uri,attr"`

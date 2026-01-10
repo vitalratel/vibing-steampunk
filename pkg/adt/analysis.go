@@ -278,25 +278,11 @@ func parseCallGraphResponse(data []byte) (*CallGraphNode, error) {
 		return nil, fmt.Errorf("parsing call graph: %w", err)
 	}
 
-	// Debug: return raw data info if no graphs found
 	if len(cgs.CallGraphs) == 0 {
-		preview := string(data)
-		if len(preview) > 500 {
-			preview = preview[:500]
-		}
-		return nil, fmt.Errorf("no callGraph elements found in response (len=%d bytes): %s", len(data), preview)
+		return nil, fmt.Errorf("no call graph data in response")
 	}
-	// Debug: show parse results
-	totalNodes := 0
-	for _, cg := range cgs.CallGraphs {
-		totalNodes += len(cg.Nodes)
-	}
-	if totalNodes == 0 {
-		preview := string(data)
-		if len(preview) > 1500 {
-			preview = preview[:1500]
-		}
-		return nil, fmt.Errorf("found %d callGraph elements with %d total nodes. XML: %s", len(cgs.CallGraphs), totalNodes, preview)
+	if len(cgs.CallGraphs[0].Nodes) == 0 {
+		return nil, fmt.Errorf("call graph contains no nodes")
 	}
 
 	// Create map of nodes by ID

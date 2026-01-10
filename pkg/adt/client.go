@@ -228,14 +228,14 @@ func (c *Client) GetFunction(ctx context.Context, functionName, groupName string
 
 // ServiceBinding represents an OData Service Binding metadata
 type ServiceBinding struct {
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Description     string `json:"description"`
-	Published       bool   `json:"published"`
-	BindingType     string `json:"bindingType"`     // ODATA
-	BindingVersion  string `json:"bindingVersion"`  // V2, V4
-	ServiceURL      string `json:"serviceUrl,omitempty"`
-	ServiceDefName  string `json:"serviceDefName,omitempty"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Description    string `json:"description"`
+	Published      bool   `json:"published"`
+	BindingType    string `json:"bindingType"`    // ODATA
+	BindingVersion string `json:"bindingVersion"` // V2, V4
+	ServiceURL     string `json:"serviceUrl,omitempty"`
+	ServiceDefName string `json:"serviceDefName,omitempty"`
 }
 
 // GetSRVB retrieves metadata for a Service Binding.
@@ -258,9 +258,7 @@ func (c *Client) GetSRVB(ctx context.Context, srvbName string) (*ServiceBinding,
 
 func parseSRVBMetadata(data []byte) (*ServiceBinding, error) {
 	// Strip namespace prefixes
-	xmlStr := string(data)
-	xmlStr = strings.ReplaceAll(xmlStr, "srvb:", "")
-	xmlStr = strings.ReplaceAll(xmlStr, "adtcore:", "")
+	xmlStr := StripXMLNamespaces(string(data), "srvb:", "adtcore:")
 
 	type binding struct {
 		Type    string `xml:"type,attr"`
@@ -293,13 +291,13 @@ func parseSRVBMetadata(data []byte) (*ServiceBinding, error) {
 	}
 
 	return &ServiceBinding{
-		Name:            root.Name,
-		Type:            root.Type,
-		Description:     root.Description,
-		Published:       root.Published,
-		BindingType:     root.Binding.Type,
-		BindingVersion:  root.Binding.Version,
-		ServiceDefName:  root.Services.Content.ServiceDef.Name,
+		Name:           root.Name,
+		Type:           root.Type,
+		Description:    root.Description,
+		Published:      root.Published,
+		BindingType:    root.Binding.Type,
+		BindingVersion: root.Binding.Version,
+		ServiceDefName: root.Services.Content.ServiceDef.Name,
 	}, nil
 }
 
@@ -456,5 +454,3 @@ func parsePackageNodeStructure(data []byte, packageName string, maxObjects, offs
 
 	return pkg, nil
 }
-
-

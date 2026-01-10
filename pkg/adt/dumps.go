@@ -194,7 +194,7 @@ func parseDumpsFeed(data []byte) ([]RuntimeDump, error) {
 	for _, entry := range feed.Entries {
 		line := 0
 		if entry.Content.Source.Line != "" {
-			fmt.Sscanf(entry.Content.Source.Line, "%d", &line)
+			_, _ = fmt.Sscanf(entry.Content.Source.Line, "%d", &line)
 		}
 
 		dump := RuntimeDump{

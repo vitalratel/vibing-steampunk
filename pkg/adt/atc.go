@@ -114,7 +114,7 @@ func (c *Client) GetATCCustomizing(ctx context.Context) (*ATCCustomizing, error)
 }
 
 func parseATCCustomizing(data []byte) (*ATCCustomizing, error) {
-	xmlStr := StripXMLNamespacePrefixes(data)
+	xmlStr := StripXMLNamespaces(string(data), "atc:", "atccust:", "adtcore:")
 
 	type property struct {
 		Name  string `xml:"name,attr"`
@@ -225,7 +225,7 @@ func (c *Client) CreateATCRun(ctx context.Context, worklistID string, objectURL 
 }
 
 func parseATCRunResult(data []byte) (*ATCRunResult, error) {
-	xmlStr := StripXMLNamespacePrefixes(data)
+	xmlStr := StripXMLNamespaces(string(data), "atc:", "chkrun:", "adtcore:")
 
 	type info struct {
 		Type        string `xml:"type,attr"`
@@ -274,7 +274,7 @@ func (c *Client) GetATCWorklist(ctx context.Context, worklistID string, includeE
 }
 
 func parseATCWorklist(data []byte) (*ATCWorklist, error) {
-	xmlStr := StripXMLNamespacePrefixes(data)
+	xmlStr := StripXMLNamespaces(string(data), "atcworklist:", "atcobject:", "atcfinding:", "adtcore:")
 
 	type tag struct {
 		Name  string `xml:"name,attr"`

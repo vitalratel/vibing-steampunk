@@ -1,82 +1,20 @@
 // ABOUTME: Integration test helpers for SAP ADT integration tests.
-// ABOUTME: Provides getIntegrationClient() and .env file loading for tests.
+// ABOUTME: Provides getIntegrationClient() for tests needing real SAP connection.
 
 package adt
 
 import (
-	"bufio"
 	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/oisee/vibing-steampunk/pkg/testutil"
 )
-
-var (
-	envOnce   sync.Once
-	envLoaded bool
-)
-
-// loadEnvFile reads a .env file and sets environment variables.
-// Searches for .env in current directory and up to 5 parent directories.
-func loadEnvFile() {
-	envOnce.Do(func() {
-		// Find .env file by walking up directories
-		dir, err := os.Getwd()
-		if err != nil {
-			return
-		}
-
-		for range 6 {
-			envPath := filepath.Join(dir, ".env")
-			if _, err := os.Stat(envPath); err == nil {
-				if parseEnvFile(envPath) == nil {
-					envLoaded = true
-					return
-				}
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	})
-}
-
-// parseEnvFile reads a .env file and sets environment variables.
-func parseEnvFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// Parse KEY=VALUE
-		if idx := strings.Index(line, "="); idx > 0 {
-			key := strings.TrimSpace(line[:idx])
-			value := strings.TrimSpace(line[idx+1:])
-			// Only set if not already set (env vars take precedence)
-			if os.Getenv(key) == "" {
-				os.Setenv(key, value)
-			}
-		}
-	}
-	return scanner.Err()
-}
 
 // getIntegrationClient creates an ADT client for integration tests.
 // Loads credentials from .env file or environment variables.
 func getIntegrationClient(t *testing.T) *Client {
-	loadEnvFile()
+	testutil.LoadEnv()
 
 	url := os.Getenv("SAP_URL")
 	user := os.Getenv("SAP_USER")
@@ -110,7 +48,7 @@ func getIntegrationClient(t *testing.T) *Client {
 
 // getTestUser returns the test user for debugging tests.
 func getTestUser(t *testing.T) string {
-	loadEnvFile()
+	testutil.LoadEnv()
 
 	user := os.Getenv("SAP_USER")
 	if user == "" {

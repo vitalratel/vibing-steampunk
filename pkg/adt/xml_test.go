@@ -51,4 +51,3 @@ func TestParseSearchResults_Empty(t *testing.T) {
 		t.Errorf("Expected 0 results, got %d", len(results))
 	}
 }
-
