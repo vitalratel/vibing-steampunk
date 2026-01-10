@@ -13,6 +13,33 @@ import (
 	"time"
 )
 
+// cleanupObject locks and deletes an object, logging any errors.
+// Use with defer to ensure cleanup after test completion.
+func cleanupObject(t *testing.T, client *Client, objectType CreatableObjectType, name, parentName string) {
+	t.Helper()
+	ctx := context.Background()
+
+	objectURL := GetObjectURL(objectType, name, parentName)
+	if objectURL == "" {
+		t.Logf("Cleanup: Could not determine URL for %s %s", objectType, name)
+		return
+	}
+
+	lock, err := client.LockObject(ctx, objectURL, "MODIFY")
+	if err != nil {
+		t.Logf("Cleanup: Failed to lock %s for delete: %v", name, err)
+		return
+	}
+
+	err = client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
+	if err != nil {
+		t.Logf("Cleanup: Failed to delete %s: %v", name, err)
+		client.UnlockObject(ctx, objectURL, lock.LockHandle)
+	} else {
+		t.Logf("Cleanup: %s deleted successfully", name)
+	}
+}
+
 // TestIntegration_CRUD_FullWorkflow tests the complete CRUD workflow:
 // Create -> Lock -> Update -> Activate -> Unlock -> Delete
 func TestIntegration_CRUD_FullWorkflow(t *testing.T) {
@@ -38,27 +65,7 @@ func TestIntegration_CRUD_FullWorkflow(t *testing.T) {
 	}
 	t.Logf("Created program: %s", programName)
 
-	// Cleanup: ensure we delete the program at the end
-	defer func() {
-		t.Log("Cleanup: Deleting program...")
-		objectURL := GetObjectURL(ObjectTypeProgram, programName, "")
-
-		// Lock for delete
-		lock, err := client.LockObject(ctx, objectURL, "MODIFY")
-		if err != nil {
-			t.Logf("Cleanup: Failed to lock for delete: %v", err)
-			return
-		}
-
-		err = client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		if err != nil {
-			t.Logf("Cleanup: Failed to delete: %v", err)
-			// Try to unlock
-			client.UnlockObject(ctx, objectURL, lock.LockHandle)
-		} else {
-			t.Log("Cleanup: Program deleted successfully")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeProgram, programName, "")
 
 	objectURL := GetObjectURL(ObjectTypeProgram, programName, "")
 	t.Logf("Object URL: %s", objectURL)
@@ -165,25 +172,7 @@ func TestIntegration_ClassWithUnitTests(t *testing.T) {
 	}
 	t.Logf("Created class: %s", className)
 
-	// Cleanup: ensure we delete the class at the end
-	defer func() {
-		t.Log("Cleanup: Deleting class...")
-		objectURL := GetObjectURL(ObjectTypeClass, className, "")
-
-		lock, err := client.LockObject(ctx, objectURL, "MODIFY")
-		if err != nil {
-			t.Logf("Cleanup: Failed to lock for delete: %v", err)
-			return
-		}
-
-		err = client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		if err != nil {
-			t.Logf("Cleanup: Failed to delete: %v", err)
-			client.UnlockObject(ctx, objectURL, lock.LockHandle)
-		} else {
-			t.Log("Cleanup: Class deleted successfully")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeClass, className, "")
 
 	objectURL := GetObjectURL(ObjectTypeClass, className, "")
 	t.Logf("Object URL: %s", objectURL)
@@ -323,14 +312,7 @@ func TestIntegration_WriteProgram(t *testing.T) {
 		t.Fatalf("Failed to create test program: %v", err)
 	}
 
-	// Cleanup at end
-	defer func() {
-		objectURL := fmt.Sprintf("/sap/bc/adt/programs/programs/%s", programName)
-		lock, _ := client.LockObject(ctx, objectURL, "MODIFY")
-		if lock != nil {
-			client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeProgram, programName, "")
 
 	// Now test WriteProgram workflow
 	source := fmt.Sprintf(`REPORT %s.
@@ -385,14 +367,7 @@ func TestIntegration_WriteClass(t *testing.T) {
 		t.Fatalf("Failed to create test class: %v", err)
 	}
 
-	// Cleanup at end
-	defer func() {
-		objectURL := fmt.Sprintf("/sap/bc/adt/oo/classes/%s", className)
-		lock, _ := client.LockObject(ctx, objectURL, "MODIFY")
-		if lock != nil {
-			client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeClass, className, "")
 
 	// Now test WriteClass workflow
 	source := fmt.Sprintf(`CLASS %s DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -443,14 +418,7 @@ DATA: lv_message TYPE string.
 lv_message = 'Hello from workflow!'.
 WRITE: / lv_message.`, strings.ToLower(programName), timestamp)
 
-	// Cleanup at end
-	defer func() {
-		objectURL := fmt.Sprintf("/sap/bc/adt/programs/programs/%s", programName)
-		lock, _ := client.LockObject(ctx, objectURL, "MODIFY")
-		if lock != nil {
-			client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeProgram, programName, "")
 
 	result, err := client.CreateAndActivateProgram(ctx, programName, "Test CreateAndActivateProgram", "$TMP", source, "")
 	if err != nil {
@@ -521,14 +489,7 @@ CLASS ltcl_test IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.`, strings.ToLower(className))
 
-	// Cleanup at end
-	defer func() {
-		objectURL := fmt.Sprintf("/sap/bc/adt/oo/classes/%s", className)
-		lock, _ := client.LockObject(ctx, objectURL, "MODIFY")
-		if lock != nil {
-			client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeClass, className, "")
 
 	result, err := client.CreateClassWithTests(ctx, className, "Test CreateClassWithTests", "$TMP", classSource, testSource, "")
 	if err != nil {
@@ -640,13 +601,7 @@ func TestIntegration_EditSource(t *testing.T) {
 	}
 
 	// Cleanup at end
-	defer func() {
-		objectURL := fmt.Sprintf("/sap/bc/adt/programs/programs/%s", programName)
-		lock, _ := client.LockObject(ctx, objectURL, "MODIFY")
-		if lock != nil {
-			client.DeleteObject(ctx, objectURL, lock.LockHandle, "")
-		}
-	}()
+	defer cleanupObject(t, client, ObjectTypeProg, programName, "")
 
 	// Set initial source using WriteProgram
 	initialSource := fmt.Sprintf(`REPORT %s.

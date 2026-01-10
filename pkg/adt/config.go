@@ -213,8 +213,8 @@ func (c *Config) NewHTTPClient() *http.Client {
 		},
 		// Connection pooling settings to avoid overwhelming SAP server
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 30,  // Keep idle connections for reuse (match MaxConnsPerHost)
-		MaxConnsPerHost:     30,  // Concurrent connections per host
+		MaxIdleConnsPerHost: 30, // Keep idle connections for reuse (match MaxConnsPerHost)
+		MaxConnsPerHost:     30, // Concurrent connections per host
 		IdleConnTimeout:     90 * time.Second,
 	}
 

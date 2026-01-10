@@ -132,7 +132,7 @@ func (c *Client) getObjectSourceByType(ctx context.Context, objectType, name str
 		name = strings.ToUpper(name)
 	case "lower":
 		name = strings.ToLower(name)
-	// "preserve" or empty = no transformation
+		// "preserve" or empty = no transformation
 	}
 
 	// Build URL with proper escaping for namespaced objects

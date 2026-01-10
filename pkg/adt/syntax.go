@@ -58,7 +58,7 @@ func (c *Client) SyntaxCheck(ctx context.Context, objectURL string, content stri
 func parseSyntaxCheckResults(data []byte) ([]SyntaxCheckResult, error) {
 	// The response uses namespace prefixes like chkrun:uri, chkrun:type, etc.
 	// Go's xml package doesn't handle namespaced attributes well, so we strip them
-	xmlStr := StripXMLNamespacePrefixes(data)
+	xmlStr := StripXMLNamespaces(string(data), "chkrun:")
 
 	type checkMessage struct {
 		URI       string `xml:"uri,attr"`

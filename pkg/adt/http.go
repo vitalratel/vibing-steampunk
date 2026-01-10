@@ -23,7 +23,7 @@ const (
 
 // Rate limiting configuration to avoid overwhelming SAP/HANA.
 const (
-	maxConcurrentRequests = 5                 // Max parallel requests to SAP
+	maxConcurrentRequests = 5                     // Max parallel requests to SAP
 	minRequestInterval    = 50 * time.Millisecond // Min time between requests
 )
 
@@ -48,9 +48,9 @@ type Transport struct {
 	sessionMu sync.RWMutex
 
 	// Rate limiting
-	semaphore    chan struct{} // Limits concurrent requests
-	lastRequest  time.Time     // Time of last request
-	lastReqMu    sync.Mutex    // Protects lastRequest
+	semaphore   chan struct{} // Limits concurrent requests
+	lastRequest time.Time     // Time of last request
+	lastReqMu   sync.Mutex    // Protects lastRequest
 }
 
 // NewTransport creates a new Transport with the given configuration.
@@ -282,9 +282,9 @@ func (t *Transport) Request(ctx context.Context, path string, opts *RequestOptio
 func isRetryableStatus(statusCode int) bool {
 	switch statusCode {
 	case http.StatusInternalServerError, // 500
-		http.StatusBadGateway,            // 502
-		http.StatusServiceUnavailable,    // 503
-		http.StatusGatewayTimeout:        // 504
+		http.StatusBadGateway,         // 502
+		http.StatusServiceUnavailable, // 503
+		http.StatusGatewayTimeout:     // 504
 		return true
 	default:
 		return false
@@ -432,13 +432,6 @@ func (t *Transport) setCSRFToken(token string) {
 	t.csrfMu.Lock()
 	defer t.csrfMu.Unlock()
 	t.csrfToken = token
-}
-
-// Session ID accessors with mutex protection
-func (t *Transport) getSessionID() string {
-	t.sessionMu.RLock()
-	defer t.sessionMu.RUnlock()
-	return t.sessionID
 }
 
 func (t *Transport) setSessionID(id string) {

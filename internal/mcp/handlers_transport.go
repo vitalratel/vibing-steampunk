@@ -154,7 +154,7 @@ func (s *Server) handleGetUserTransports(ctx context.Context, request mcp.CallTo
 	if len(transports.Workbench) > 0 {
 		sb.WriteString("=== Workbench Requests ===\n")
 		for _, tr := range transports.Workbench {
-			formatTransportRequest(&sb, &tr)
+			formatTransportSummary(&sb, &tr)
 		}
 	} else {
 		sb.WriteString("No workbench requests found.\n")
@@ -165,7 +165,7 @@ func (s *Server) handleGetUserTransports(ctx context.Context, request mcp.CallTo
 	if len(transports.Customizing) > 0 {
 		sb.WriteString("=== Customizing Requests ===\n")
 		for _, tr := range transports.Customizing {
-			formatTransportRequest(&sb, &tr)
+			formatTransportSummary(&sb, &tr)
 		}
 	} else {
 		sb.WriteString("No customizing requests found.\n")
@@ -174,7 +174,7 @@ func (s *Server) handleGetUserTransports(ctx context.Context, request mcp.CallTo
 	return mcp.NewToolResultText(sb.String()), nil
 }
 
-func formatTransportRequest(sb *strings.Builder, tr *adt.TransportRequest) {
+func formatTransportSummary(sb *strings.Builder, tr *adt.TransportSummary) {
 	fmt.Fprintf(sb, "\n%s - %s\n", tr.Number, tr.Description)
 	fmt.Fprintf(sb, "  Owner: %s, Status: %s", tr.Owner, tr.Status)
 	if tr.Target != "" {
@@ -189,7 +189,7 @@ func formatTransportRequest(sb *strings.Builder, tr *adt.TransportRequest) {
 				task.Number, task.Description, task.Owner, task.Status)
 			if len(task.Objects) > 0 {
 				for _, obj := range task.Objects {
-					fmt.Fprintf(sb, "      - %s %s %s\n", obj.PGMID, obj.Type, obj.Name)
+					fmt.Fprintf(sb, "      - %s %s %s\n", obj.PgmID, obj.Type, obj.Name)
 				}
 			}
 		}
@@ -215,7 +215,7 @@ func (s *Server) handleGetTransportInfo(ctx context.Context, request mcp.CallToo
 	// Format output
 	var sb strings.Builder
 	sb.WriteString("Transport Information:\n\n")
-	fmt.Fprintf(&sb, "PGMID: %s\n", info.PGMID)
+	fmt.Fprintf(&sb, "PGMID: %s\n", info.PgmID)
 	fmt.Fprintf(&sb, "Object: %s\n", info.Object)
 	fmt.Fprintf(&sb, "Object Name: %s\n", info.ObjectName)
 	fmt.Fprintf(&sb, "Operation: %s\n", info.Operation)
@@ -359,7 +359,7 @@ func (s *Server) handleCreateTransport(ctx context.Context, request mcp.CallTool
 		Type:           transportType,
 	}
 
-	transportNumber, err := s.adtClient.CreateTransportV2(ctx, opts)
+	transportNumber, err := s.adtClient.CreateTransport(ctx, opts)
 	if err != nil {
 		return wrapErr("CreateTransport", err), nil
 	}
@@ -377,15 +377,14 @@ func (s *Server) handleReleaseTransport(ctx context.Context, request mcp.CallToo
 		return newToolResultError(err.Error()), nil
 	}
 
-	ignoreLocks, _ := request.Params.Arguments["ignore_locks"].(bool)
-	skipATC, _ := request.Params.Arguments["skip_atc"].(bool)
-
-	opts := adt.ReleaseTransportOptions{
-		IgnoreLocks: ignoreLocks,
-		SkipATC:     skipATC,
+	opts := adt.ReleaseTransportOptions{}
+	if skipATC, _ := request.Params.Arguments["skip_atc"].(bool); skipATC {
+		opts.Action = adt.ReleaseActionSkipATC
+	} else if ignoreLocks, _ := request.Params.Arguments["ignore_locks"].(bool); ignoreLocks {
+		opts.Action = adt.ReleaseActionIgnoreLocks
 	}
 
-	err := s.adtClient.ReleaseTransportV2(ctx, transport, opts)
+	err := s.adtClient.ReleaseTransport(ctx, transport, opts)
 	if err != nil {
 		return wrapErr("ReleaseTransport", err), nil
 	}

@@ -174,7 +174,7 @@ func parseInactiveObjects(data []byte) ([]InactiveObjectRecord, error) {
 	}
 
 	// Strip namespace prefixes
-	xmlStr := StripXMLNamespacePrefixes(data)
+	xmlStr := StripXMLNamespaces(string(data), "adtcore:", "ioc:")
 
 	type ref struct {
 		URI       string `xml:"uri,attr"`

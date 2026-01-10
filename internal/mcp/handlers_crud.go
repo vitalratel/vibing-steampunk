@@ -26,20 +26,18 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 	case "edit":
 		switch objectType {
 		case "LOCK":
-			objectURL, _ := params["object_url"].(string)
+			objectURL := getStr(params, "object_url")
 			if objectURL == "" {
 				return newToolResultError("object_url is required in params"), true, nil
 			}
 			args := map[string]any{"object_url": objectURL}
-			if accessMode, ok := params["access_mode"].(string); ok {
-				args["access_mode"] = accessMode
-			}
+			copyOptional(args, params, "access_mode")
 			result, err := s.handleLockObject(ctx, newRequest(args))
 			return result, true, err
 
 		case "UNLOCK":
-			objectURL, _ := params["object_url"].(string)
-			lockHandle, _ := params["lock_handle"].(string)
+			objectURL := getStr(params, "object_url")
+			lockHandle := getStr(params, "lock_handle")
 			if objectURL == "" || lockHandle == "" {
 				return newToolResultError("object_url and lock_handle are required in params"), true, nil
 			}
@@ -50,9 +48,9 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 			return result, true, err
 
 		case "UPDATE_SOURCE":
-			objectURL, _ := params["object_url"].(string)
-			source, _ := params["source"].(string)
-			lockHandle, _ := params["lock_handle"].(string)
+			objectURL := getStr(params, "object_url")
+			source := getStr(params, "source")
+			lockHandle := getStr(params, "lock_handle")
 			if objectURL == "" || source == "" || lockHandle == "" {
 				return newToolResultError("object_url, source, and lock_handle are required in params"), true, nil
 			}
@@ -61,19 +59,17 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"source":      source,
 				"lock_handle": lockHandle,
 			}
-			if transport, ok := params["transport"].(string); ok {
-				args["transport"] = transport
-			}
+			copyOptional(args, params, "transport")
 			result, err := s.handleUpdateSource(ctx, newRequest(args))
 			return result, true, err
 
 		case "MOVE":
-			objType, _ := params["object_type"].(string)
+			objType := getStr(params, "object_type")
 			objName := objectName
 			if objName == "" {
-				objName, _ = params["object_name"].(string)
+				objName = getStr(params, "object_name")
 			}
-			newPackage, _ := params["new_package"].(string)
+			newPackage := getStr(params, "new_package")
 			if objType == "" || objName == "" || newPackage == "" {
 				return newToolResultError("object_type, object_name, and new_package are required"), true, nil
 			}
@@ -88,13 +84,13 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 	case "create":
 		switch objectType {
 		case "OBJECT":
-			objType, _ := params["object_type"].(string)
+			objType := getStr(params, "object_type")
 			name := objectName
 			if name == "" {
-				name, _ = params["name"].(string)
+				name = getStr(params, "name")
 			}
-			description, _ := params["description"].(string)
-			packageName, _ := params["package_name"].(string)
+			description := getStr(params, "description")
+			packageName := getStr(params, "package_name")
 			if objType == "" || name == "" || description == "" || packageName == "" {
 				return newToolResultError("object_type, name, description, and package_name are required"), true, nil
 			}
@@ -104,30 +100,16 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"description":  description,
 				"package_name": packageName,
 			}
-			if transport, ok := params["transport"].(string); ok {
-				args["transport"] = transport
-			}
-			if parent, ok := params["parent_name"].(string); ok {
-				args["parent_name"] = parent
-			}
-			if sd, ok := params["service_definition"].(string); ok {
-				args["service_definition"] = sd
-			}
-			if bv, ok := params["binding_version"].(string); ok {
-				args["binding_version"] = bv
-			}
-			if bc, ok := params["binding_category"].(string); ok {
-				args["binding_category"] = bc
-			}
+			copyOptional(args, params, "transport", "parent_name", "service_definition", "binding_version", "binding_category")
 			result, err := s.handleCreateObject(ctx, newRequest(args))
 			return result, true, err
 
 		case "DEVC":
 			name := objectName
 			if name == "" {
-				name, _ = params["name"].(string)
+				name = getStr(params, "name")
 			}
-			description, _ := params["description"].(string)
+			description := getStr(params, "description")
 			if name == "" || description == "" {
 				return newToolResultError("name and description are required"), true, nil
 			}
@@ -135,19 +117,17 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"name":        name,
 				"description": description,
 			}
-			if parent, ok := params["parent"].(string); ok {
-				args["parent"] = parent
-			}
+			copyOptional(args, params, "parent")
 			result, err := s.handleCreatePackage(ctx, newRequest(args))
 			return result, true, err
 
 		case "TABL":
 			name := objectName
 			if name == "" {
-				name, _ = params["name"].(string)
+				name = getStr(params, "name")
 			}
-			description, _ := params["description"].(string)
-			fields, _ := params["fields"].(string)
+			description := getStr(params, "description")
+			fields := getStr(params, "fields")
 			if name == "" || description == "" || fields == "" {
 				return newToolResultError("name, description, and fields (JSON) are required"), true, nil
 			}
@@ -156,26 +136,18 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"description": description,
 				"fields":      fields,
 			}
-			if pkg, ok := params["package"].(string); ok {
-				args["package"] = pkg
-			}
-			if transport, ok := params["transport"].(string); ok {
-				args["transport"] = transport
-			}
-			if dc, ok := params["delivery_class"].(string); ok {
-				args["delivery_class"] = dc
-			}
+			copyOptional(args, params, "package", "transport", "delivery_class")
 			result, err := s.handleCreateTable(ctx, newRequest(args))
 			return result, true, err
 
 		case "CLONE":
-			objType, _ := params["object_type"].(string)
+			objType := getStr(params, "object_type")
 			sourceName := objectName
 			if sourceName == "" {
-				sourceName, _ = params["source_name"].(string)
+				sourceName = getStr(params, "source_name")
 			}
-			targetName, _ := params["target_name"].(string)
-			pkg, _ := params["package"].(string)
+			targetName := getStr(params, "target_name")
+			pkg := getStr(params, "package")
 			if objType == "" || sourceName == "" || targetName == "" || pkg == "" {
 				return newToolResultError("object_type, source_name, target_name, and package are required"), true, nil
 			}
@@ -190,8 +162,8 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 
 	case "delete":
 		if objectType == "OBJECT" {
-			objectURL, _ := params["object_url"].(string)
-			lockHandle, _ := params["lock_handle"].(string)
+			objectURL := getStr(params, "object_url")
+			lockHandle := getStr(params, "lock_handle")
 			if objectURL == "" || lockHandle == "" {
 				return newToolResultError("object_url and lock_handle are required in params"), true, nil
 			}
@@ -199,9 +171,7 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"object_url":  objectURL,
 				"lock_handle": lockHandle,
 			}
-			if transport, ok := params["transport"].(string); ok {
-				args["transport"] = transport
-			}
+			copyOptional(args, params, "transport")
 			result, err := s.handleDeleteObject(ctx, newRequest(args))
 			return result, true, err
 		}
@@ -210,7 +180,7 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 		if objectType == "CLAS_INFO" {
 			className := objectName
 			if className == "" {
-				className, _ = params["class_name"].(string)
+				className = getStr(params, "class_name")
 			}
 			if className == "" {
 				return newToolResultError("class_name is required"), true, nil
@@ -220,12 +190,12 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 		}
 
 	case "analyze":
-		analysisType, _ := params["type"].(string)
+		analysisType := getStr(params, "type")
 		if analysisType == "compare_source" {
-			type1, _ := params["type1"].(string)
-			name1, _ := params["name1"].(string)
-			type2, _ := params["type2"].(string)
-			name2, _ := params["name2"].(string)
+			type1 := getStr(params, "type1")
+			name1 := getStr(params, "name1")
+			type2 := getStr(params, "type2")
+			name2 := getStr(params, "name2")
 			if type1 == "" || name1 == "" || type2 == "" || name2 == "" {
 				return newToolResultError("type1, name1, type2, and name2 are required in params"), true, nil
 			}
@@ -235,18 +205,7 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				"type2": type2,
 				"name2": name2,
 			}
-			if inc, ok := params["include1"].(string); ok {
-				args["include1"] = inc
-			}
-			if parent, ok := params["parent1"].(string); ok {
-				args["parent1"] = parent
-			}
-			if inc, ok := params["include2"].(string); ok {
-				args["include2"] = inc
-			}
-			if parent, ok := params["parent2"].(string); ok {
-				args["parent2"] = parent
-			}
+			copyOptional(args, params, "include1", "parent1", "include2", "parent2")
 			result, err := s.handleCompareSource(ctx, newRequest(args))
 			return result, true, err
 		}
@@ -258,14 +217,15 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 // --- CRUD Handlers ---
 
 func (s *Server) handleLockObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectURL, ok := request.Params.Arguments["object_url"].(string)
-	if !ok || objectURL == "" {
-		return newToolResultError("object_url is required"), nil
+	args := request.Params.Arguments
+	objectURL, errResult := requireStr(args, "object_url")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	accessMode := "MODIFY"
-	if am, ok := request.Params.Arguments["access_mode"].(string); ok && am != "" {
-		accessMode = am
+	accessMode := getStr(args, "access_mode")
+	if accessMode == "" {
+		accessMode = "MODIFY"
 	}
 
 	result, err := s.adtClient.LockObject(ctx, objectURL, accessMode)
@@ -276,14 +236,14 @@ func (s *Server) handleLockObject(ctx context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleUnlockObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectURL, ok := request.Params.Arguments["object_url"].(string)
-	if !ok || objectURL == "" {
-		return newToolResultError("object_url is required"), nil
+	args := request.Params.Arguments
+	objectURL, errResult := requireStr(args, "object_url")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	lockHandle, ok := request.Params.Arguments["lock_handle"].(string)
-	if !ok || lockHandle == "" {
-		return newToolResultError("lock_handle is required"), nil
+	lockHandle, errResult := requireStr(args, "lock_handle")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	err := s.adtClient.UnlockObject(ctx, objectURL, lockHandle)
@@ -294,25 +254,20 @@ func (s *Server) handleUnlockObject(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *Server) handleUpdateSource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectURL, ok := request.Params.Arguments["object_url"].(string)
-	if !ok || objectURL == "" {
-		return newToolResultError("object_url is required"), nil
+	args := request.Params.Arguments
+	objectURL, errResult := requireStr(args, "object_url")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	source, ok := request.Params.Arguments["source"].(string)
-	if !ok || source == "" {
-		return newToolResultError("source is required"), nil
+	source, errResult := requireStr(args, "source")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	lockHandle, ok := request.Params.Arguments["lock_handle"].(string)
-	if !ok || lockHandle == "" {
-		return newToolResultError("lock_handle is required"), nil
+	lockHandle, errResult := requireStr(args, "lock_handle")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	transport := ""
-	if t, ok := request.Params.Arguments["transport"].(string); ok {
-		transport = t
-	}
+	transport := getStr(args, "transport")
 
 	// Append /source/main to object URL if not already present
 	sourceURL := objectURL
@@ -328,48 +283,22 @@ func (s *Server) handleUpdateSource(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *Server) handleCreateObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectType, ok := request.Params.Arguments["object_type"].(string)
-	if !ok || objectType == "" {
-		return newToolResultError("object_type is required"), nil
+	args := request.Params.Arguments
+	objectType, errResult := requireStr(args, "object_type")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	name, ok := request.Params.Arguments["name"].(string)
-	if !ok || name == "" {
-		return newToolResultError("name is required"), nil
+	name, errResult := requireStr(args, "name")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	description, ok := request.Params.Arguments["description"].(string)
-	if !ok || description == "" {
-		return newToolResultError("description is required"), nil
+	description, errResult := requireStr(args, "description")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	packageName, ok := request.Params.Arguments["package_name"].(string)
-	if !ok || packageName == "" {
-		return newToolResultError("package_name is required"), nil
-	}
-
-	transport := ""
-	if t, ok := request.Params.Arguments["transport"].(string); ok {
-		transport = t
-	}
-
-	parentName := ""
-	if p, ok := request.Params.Arguments["parent_name"].(string); ok {
-		parentName = p
-	}
-
-	// RAP-specific options
-	serviceDefinition := ""
-	if sd, ok := request.Params.Arguments["service_definition"].(string); ok {
-		serviceDefinition = sd
-	}
-	bindingVersion := ""
-	if bv, ok := request.Params.Arguments["binding_version"].(string); ok {
-		bindingVersion = bv
-	}
-	bindingCategory := ""
-	if bc, ok := request.Params.Arguments["binding_category"].(string); ok {
-		bindingCategory = bc
+	packageName, errResult := requireStr(args, "package_name")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	opts := adt.CreateObjectOptions{
@@ -377,11 +306,11 @@ func (s *Server) handleCreateObject(ctx context.Context, request mcp.CallToolReq
 		Name:              name,
 		Description:       description,
 		PackageName:       packageName,
-		Transport:         transport,
-		ParentName:        parentName,
-		ServiceDefinition: serviceDefinition,
-		BindingVersion:    bindingVersion,
-		BindingCategory:   bindingCategory,
+		Transport:         getStr(args, "transport"),
+		ParentName:        getStr(args, "parent_name"),
+		ServiceDefinition: getStr(args, "service_definition"),
+		BindingVersion:    getStr(args, "binding_version"),
+		BindingCategory:   getStr(args, "binding_category"),
 	}
 
 	err := s.adtClient.CreateObject(ctx, opts)
@@ -398,32 +327,27 @@ func (s *Server) handleCreateObject(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *Server) handleCreatePackage(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	name, ok := request.Params.Arguments["name"].(string)
-	if !ok || name == "" {
-		return newToolResultError("name is required"), nil
+	args := request.Params.Arguments
+	name, errResult := requireStr(args, "name")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	// Validate package name starts with $
 	name = strings.ToUpper(name)
 	if !strings.HasPrefix(name, "$") {
 		return newToolResultError("package name must start with $ (local packages only)"), nil
 	}
 
-	description, ok := request.Params.Arguments["description"].(string)
-	if !ok || description == "" {
-		return newToolResultError("description is required"), nil
+	description, errResult := requireStr(args, "description")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	parent := ""
-	if p, ok := request.Params.Arguments["parent"].(string); ok && p != "" {
-		parent = strings.ToUpper(p)
-	}
+	parent := strings.ToUpper(getStr(args, "parent"))
 
 	opts := adt.CreateObjectOptions{
 		ObjectType:  adt.ObjectTypePackage,
 		Name:        name,
 		Description: description,
-		PackageName: parent, // Parent package
+		PackageName: parent,
 	}
 
 	err := s.adtClient.CreateObject(ctx, opts)
@@ -443,45 +367,39 @@ func (s *Server) handleCreatePackage(ctx context.Context, request mcp.CallToolRe
 }
 
 func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	name, ok := request.Params.Arguments["name"].(string)
-	if !ok || name == "" {
-		return newToolResultError("name is required"), nil
+	args := request.Params.Arguments
+	name, errResult := requireStr(args, "name")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	description, ok := request.Params.Arguments["description"].(string)
-	if !ok || description == "" {
-		return newToolResultError("description is required"), nil
+	description, errResult := requireStr(args, "description")
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	fieldsJSON, ok := request.Params.Arguments["fields"].(string)
-	if !ok || fieldsJSON == "" {
+	fieldsJSON, errResult := requireStr(args, "fields")
+	if errResult != nil {
 		return newToolResultError("fields is required (JSON array)"), nil
 	}
 
-	// Parse fields JSON
 	var fields []adt.TableField
 	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
 		return wrapErr("ParseFieldsJSON", err), nil
 	}
-
 	if len(fields) == 0 {
 		return newToolResultError("At least one field is required"), nil
 	}
 
-	// Optional parameters
-	pkg := "$TMP"
-	if p, ok := request.Params.Arguments["package"].(string); ok && p != "" {
-		pkg = strings.ToUpper(p)
+	pkg := getStr(args, "package")
+	if pkg == "" {
+		pkg = "$TMP"
+	} else {
+		pkg = strings.ToUpper(pkg)
 	}
-
-	transport := ""
-	if t, ok := request.Params.Arguments["transport"].(string); ok && t != "" {
-		transport = t
-	}
-
-	deliveryClass := "A"
-	if dc, ok := request.Params.Arguments["delivery_class"].(string); ok && dc != "" {
-		deliveryClass = strings.ToUpper(dc)
+	deliveryClass := getStr(args, "delivery_class")
+	if deliveryClass == "" {
+		deliveryClass = "A"
+	} else {
+		deliveryClass = strings.ToUpper(deliveryClass)
 	}
 
 	opts := adt.CreateTableOptions{
@@ -489,7 +407,7 @@ func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequ
 		Description:   description,
 		Package:       pkg,
 		Fields:        fields,
-		Transport:     transport,
+		Transport:     getStr(args, "transport"),
 		DeliveryClass: deliveryClass,
 	}
 
@@ -508,31 +426,31 @@ func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequ
 }
 
 func (s *Server) handleCompareSource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	type1, _ := request.Params.Arguments["type1"].(string)
-	name1, _ := request.Params.Arguments["name1"].(string)
-	type2, _ := request.Params.Arguments["type2"].(string)
-	name2, _ := request.Params.Arguments["name2"].(string)
-
-	if type1 == "" || name1 == "" || type2 == "" || name2 == "" {
-		return newToolResultError("type1, name1, type2, and name2 are all required"), nil
+	args := request.Params.Arguments
+	type1, errResult := requireStr(args, "type1")
+	if errResult != nil {
+		return errResult, nil
+	}
+	name1, errResult := requireStr(args, "name1")
+	if errResult != nil {
+		return errResult, nil
+	}
+	type2, errResult := requireStr(args, "type2")
+	if errResult != nil {
+		return errResult, nil
+	}
+	name2, errResult := requireStr(args, "name2")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	// Build options for first object
-	opts1 := &adt.GetSourceOptions{}
-	if inc, ok := request.Params.Arguments["include1"].(string); ok && inc != "" {
-		opts1.Include = inc
+	opts1 := &adt.GetSourceOptions{
+		Include: getStr(args, "include1"),
+		Parent:  getStr(args, "parent1"),
 	}
-	if parent, ok := request.Params.Arguments["parent1"].(string); ok && parent != "" {
-		opts1.Parent = parent
-	}
-
-	// Build options for second object
-	opts2 := &adt.GetSourceOptions{}
-	if inc, ok := request.Params.Arguments["include2"].(string); ok && inc != "" {
-		opts2.Include = inc
-	}
-	if parent, ok := request.Params.Arguments["parent2"].(string); ok && parent != "" {
-		opts2.Parent = parent
+	opts2 := &adt.GetSourceOptions{
+		Include: getStr(args, "include2"),
+		Parent:  getStr(args, "parent2"),
 	}
 
 	diff, err := s.adtClient.CompareSource(ctx, type1, name1, type2, name2, opts1, opts2)
@@ -543,13 +461,22 @@ func (s *Server) handleCompareSource(ctx context.Context, request mcp.CallToolRe
 }
 
 func (s *Server) handleCloneObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectType, _ := request.Params.Arguments["object_type"].(string)
-	sourceName, _ := request.Params.Arguments["source_name"].(string)
-	targetName, _ := request.Params.Arguments["target_name"].(string)
-	pkg, _ := request.Params.Arguments["package"].(string)
-
-	if objectType == "" || sourceName == "" || targetName == "" || pkg == "" {
-		return newToolResultError("object_type, source_name, target_name, and package are all required"), nil
+	args := request.Params.Arguments
+	objectType, errResult := requireStr(args, "object_type")
+	if errResult != nil {
+		return errResult, nil
+	}
+	sourceName, errResult := requireStr(args, "source_name")
+	if errResult != nil {
+		return errResult, nil
+	}
+	targetName, errResult := requireStr(args, "target_name")
+	if errResult != nil {
+		return errResult, nil
+	}
+	pkg, errResult := requireStr(args, "package")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.adtClient.CloneObject(ctx, objectType, sourceName, targetName, pkg)
@@ -560,9 +487,9 @@ func (s *Server) handleCloneObject(ctx context.Context, request mcp.CallToolRequ
 }
 
 func (s *Server) handleGetClassInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	className, _ := request.Params.Arguments["class_name"].(string)
-	if className == "" {
-		return newToolResultError("class_name is required"), nil
+	className, errResult := requireStr(request.Params.Arguments, "class_name")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	info, err := s.adtClient.GetClassInfo(ctx, className)
@@ -573,22 +500,17 @@ func (s *Server) handleGetClassInfo(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *Server) handleDeleteObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectURL, ok := request.Params.Arguments["object_url"].(string)
-	if !ok || objectURL == "" {
-		return newToolResultError("object_url is required"), nil
+	args := request.Params.Arguments
+	objectURL, errResult := requireStr(args, "object_url")
+	if errResult != nil {
+		return errResult, nil
+	}
+	lockHandle, errResult := requireStr(args, "lock_handle")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	lockHandle, ok := request.Params.Arguments["lock_handle"].(string)
-	if !ok || lockHandle == "" {
-		return newToolResultError("lock_handle is required"), nil
-	}
-
-	transport := ""
-	if t, ok := request.Params.Arguments["transport"].(string); ok {
-		transport = t
-	}
-
-	err := s.adtClient.DeleteObject(ctx, objectURL, lockHandle, transport)
+	err := s.adtClient.DeleteObject(ctx, objectURL, lockHandle, getStr(args, "transport"))
 	if err != nil {
 		return wrapErr("DeleteObject", err), nil
 	}
@@ -596,22 +518,20 @@ func (s *Server) handleDeleteObject(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *Server) handleMoveObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	objectType, ok := request.Params.Arguments["object_type"].(string)
-	if !ok || objectType == "" {
-		return newToolResultError("object_type is required"), nil
+	args := request.Params.Arguments
+	objectType, errResult := requireStr(args, "object_type")
+	if errResult != nil {
+		return errResult, nil
+	}
+	objectName, errResult := requireStr(args, "object_name")
+	if errResult != nil {
+		return errResult, nil
+	}
+	newPackage, errResult := requireStr(args, "new_package")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	objectName, ok := request.Params.Arguments["object_name"].(string)
-	if !ok || objectName == "" {
-		return newToolResultError("object_name is required"), nil
-	}
-
-	newPackage, ok := request.Params.Arguments["new_package"].(string)
-	if !ok || newPackage == "" {
-		return newToolResultError("new_package is required"), nil
-	}
-
-	// Ensure WebSocket client is connected
 	if err := s.ensureDebugWSClient(ctx); err != nil {
 		return wrapErr("ConnectWebSocket", err), nil
 	}
@@ -621,7 +541,6 @@ func (s *Server) handleMoveObject(ctx context.Context, request mcp.CallToolReque
 		return wrapErr("MoveObject", err), nil
 	}
 
-	// Format result
 	if result.Success {
 		return newToolResultJSON(map[string]any{
 			"status":      "success",

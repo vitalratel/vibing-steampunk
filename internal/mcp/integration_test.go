@@ -4,81 +4,18 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/oisee/vibing-steampunk/pkg/testutil"
 )
-
-var (
-	envOnce   sync.Once
-	envLoaded bool
-)
-
-// loadEnvFile reads a .env file and sets environment variables.
-// Searches for .env in current directory and up to 5 parent directories.
-func loadEnvFile() {
-	envOnce.Do(func() {
-		// Find .env file by walking up directories
-		dir, err := os.Getwd()
-		if err != nil {
-			return
-		}
-
-		for range 6 {
-			envPath := filepath.Join(dir, ".env")
-			if _, err := os.Stat(envPath); err == nil {
-				if parseEnvFile(envPath) == nil {
-					envLoaded = true
-					return
-				}
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	})
-}
-
-// parseEnvFile reads a .env file and sets environment variables.
-func parseEnvFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// Parse KEY=VALUE
-		if idx := strings.Index(line, "="); idx > 0 {
-			key := strings.TrimSpace(line[:idx])
-			value := strings.TrimSpace(line[idx+1:])
-			// Only set if not already set (env vars take precedence)
-			if os.Getenv(key) == "" {
-				os.Setenv(key, value)
-			}
-		}
-	}
-	return scanner.Err()
-}
 
 // getIntegrationServer creates an MCP server for integration tests.
 // Loads credentials from .env file or environment variables.
 func getIntegrationServer(t *testing.T) *Server {
-	loadEnvFile()
+	testutil.LoadEnv()
 
 	url := os.Getenv("SAP_URL")
 	user := os.Getenv("SAP_USER")

@@ -77,3 +77,21 @@ func (s *Server) ensureWSConnected(ctx context.Context, toolName string) *mcp.Ca
 	}
 	return nil
 }
+
+// copyOptional copies optional string params from src to dst if present.
+func copyOptional(dst, src map[string]any, keys ...string) {
+	for _, key := range keys {
+		if v, ok := src[key].(string); ok && v != "" {
+			dst[key] = v
+		}
+	}
+}
+
+// copyOptionalBool copies optional bool params from src to dst if present.
+func copyOptionalBool(dst, src map[string]any, keys ...string) {
+	for _, key := range keys {
+		if v, ok := src[key].(bool); ok {
+			dst[key] = v
+		}
+	}
+}

@@ -52,11 +52,11 @@ const (
 
 // FeatureStatus represents the probed status of a feature
 type FeatureStatus struct {
-	ID        FeatureID `json:"id"`
-	Available bool      `json:"available"`
+	ID        FeatureID   `json:"id"`
+	Available bool        `json:"available"`
 	Mode      FeatureMode `json:"mode"`
-	Message   string    `json:"message,omitempty"`
-	ProbedAt  time.Time `json:"probed_at,omitempty"`
+	Message   string      `json:"message,omitempty"`
+	ProbedAt  time.Time   `json:"probed_at,omitempty"`
 }
 
 // FeatureConfig controls which optional features are enabled
