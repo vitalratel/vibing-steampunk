@@ -12,6 +12,78 @@ import (
 	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
 
+// --- Debugger Routing ---
+// Routes for this module:
+//   debug: set_breakpoint, get_breakpoints, delete_breakpoint, call_rfc, setup
+
+// routeDebuggerAction routes debugger-specific actions.
+// Returns (result, true) if handled, (nil, false) if not handled by this module.
+func (s *Server) routeDebuggerAction(ctx context.Context, action, objectType, objectName string, params map[string]any) (*mcp.CallToolResult, bool, error) {
+	if action != "debug" {
+		return nil, false, nil
+	}
+
+	debugType := objectType
+	if debugType == "" {
+		debugType, _ = params["type"].(string)
+	}
+
+	switch debugType {
+	case "set_breakpoint", "setup":
+		kind, _ := params["kind"].(string)
+		if kind == "" {
+			kind = "line"
+		}
+		args := map[string]any{"kind": kind}
+		if program, ok := params["program"].(string); ok {
+			args["program"] = program
+		}
+		if line, ok := params["line"].(float64); ok {
+			args["line"] = line
+		}
+		if method, ok := params["method"].(string); ok {
+			args["method"] = method
+		}
+		if statement, ok := params["statement"].(string); ok {
+			args["statement"] = statement
+		}
+		if exception, ok := params["exception"].(string); ok {
+			args["exception"] = exception
+		}
+		result, err := s.handleSetBreakpoint(ctx, newRequest(args))
+		return result, true, err
+
+	case "get_breakpoints", "breakpoints":
+		result, err := s.handleGetBreakpoints(ctx, newRequest(nil))
+		return result, true, err
+
+	case "delete_breakpoint":
+		bpID, _ := params["breakpoint_id"].(string)
+		if bpID == "" {
+			bpID = objectName
+		}
+		if bpID == "" {
+			return newToolResultError("breakpoint_id is required"), true, nil
+		}
+		result, err := s.handleDeleteBreakpoint(ctx, newRequest(map[string]any{"breakpoint_id": bpID}))
+		return result, true, err
+
+	case "call_rfc":
+		function, _ := params["function"].(string)
+		if function == "" {
+			return newToolResultError("function is required for call_rfc"), true, nil
+		}
+		args := map[string]any{"function": function}
+		if rfcParams, ok := params["params"].(string); ok {
+			args["params"] = rfcParams
+		}
+		result, err := s.handleCallRFC(ctx, newRequest(args))
+		return result, true, err
+	}
+
+	return nil, false, nil
+}
+
 // --- Debugger Session Handlers (WebSocket-based via ZADT_VSP) ---
 // All breakpoint operations use WebSocket for reliable CSRF-free communication.
 
@@ -42,7 +114,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 
 	// Ensure WebSocket client is connected
 	if err := s.ensureDebugWSClient(ctx); err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v. Ensure ZADT_VSP is deployed and SAPC/SICF are configured.", err)), nil
+		return newToolResultError("SetBreakpoint: WebSocket connect failed: " + err.Error() + ". Ensure ZADT_VSP is deployed and SAPC/SICF are configured."), nil
 	}
 
 	var bpID string
@@ -73,7 +145,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 		if method != "" {
 			bpID, err = s.debugWSClient.SetMethodBreakpoint(ctx, program, method, line)
 			if err != nil {
-				return newToolResultError(fmt.Sprintf("SetMethodBreakpoint failed: %v", err)), nil
+				return wrapErr("SetMethodBreakpoint", err), nil
 			}
 
 			msg.WriteString("Method breakpoint set successfully!\n\n")
@@ -89,7 +161,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 		} else {
 			bpID, err = s.debugWSClient.SetLineBreakpoint(ctx, program, line)
 			if err != nil {
-				return newToolResultError(fmt.Sprintf("SetLineBreakpoint failed: %v", err)), nil
+				return wrapErr("SetLineBreakpoint", err), nil
 			}
 
 			msg.WriteString("Line breakpoint set successfully!\n\n")
@@ -110,7 +182,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 
 		bpID, err = s.debugWSClient.SetStatementBreakpoint(ctx, statement)
 		if err != nil {
-			return newToolResultError(fmt.Sprintf("SetStatementBreakpoint failed: %v", err)), nil
+			return wrapErr("SetStatementBreakpoint", err), nil
 		}
 
 		msg.WriteString("Statement breakpoint set successfully!\n\n")
@@ -126,7 +198,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 
 		bpID, err = s.debugWSClient.SetExceptionBreakpoint(ctx, exception)
 		if err != nil {
-			return newToolResultError(fmt.Sprintf("SetExceptionBreakpoint failed: %v", err)), nil
+			return wrapErr("SetExceptionBreakpoint", err), nil
 		}
 
 		msg.WriteString("Exception breakpoint set successfully!\n\n")
@@ -135,7 +207,7 @@ func (s *Server) handleSetBreakpoint(ctx context.Context, request mcp.CallToolRe
 		msg.WriteString("\nThis breakpoint will trigger when this exception is raised.\n")
 
 	default:
-		return newToolResultError(fmt.Sprintf("Invalid breakpoint kind: %s. Valid kinds: line, statement, exception", kind)), nil
+		return newToolResultError("Invalid breakpoint kind: " + kind + ". Valid kinds: line, statement, exception"), nil
 	}
 
 	msg.WriteString("\n⚠️  IMPORTANT: Breakpoints only trigger for code executed in a DIFFERENT SAP session.\n")
@@ -181,12 +253,12 @@ func convertToClassPool(program string) string {
 
 func (s *Server) handleGetBreakpoints(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if err := s.ensureDebugWSClient(ctx); err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v", err)), nil
+		return wrapErr("GetBreakpoints/Connect", err), nil
 	}
 
 	breakpoints, err := s.debugWSClient.GetBreakpoints(ctx)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("GetBreakpoints failed: %v", err)), nil
+		return wrapErr("GetBreakpoints", err), nil
 	}
 
 	if len(breakpoints) == 0 {
@@ -219,14 +291,14 @@ func (s *Server) handleDeleteBreakpoint(ctx context.Context, request mcp.CallToo
 	}
 
 	if err := s.ensureDebugWSClient(ctx); err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v", err)), nil
+		return wrapErr("DeleteBreakpoint/Connect", err), nil
 	}
 
 	if err := s.debugWSClient.DeleteBreakpoint(ctx, bpID); err != nil {
-		return newToolResultError(fmt.Sprintf("DeleteBreakpoint failed: %v", err)), nil
+		return wrapErr("DeleteBreakpoint", err), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Breakpoint %s deleted successfully.", bpID)), nil
+	return mcp.NewToolResultText("Breakpoint " + bpID + " deleted successfully."), nil
 }
 
 func (s *Server) handleCallRFC(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -236,26 +308,26 @@ func (s *Server) handleCallRFC(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	// Parse params if provided
-	params := make(map[string]string)
+	rfcParams := make(map[string]string)
 	if paramsStr, ok := request.Params.Arguments["params"].(string); ok && paramsStr != "" {
 		// Parse JSON params
-		var rawParams map[string]interface{}
+		var rawParams map[string]any
 		if err := json.Unmarshal([]byte(paramsStr), &rawParams); err != nil {
-			return newToolResultError(fmt.Sprintf("Invalid params JSON: %v", err)), nil
+			return wrapErr("CallRFC/ParseParams", err), nil
 		}
 		for k, v := range rawParams {
-			params[k] = fmt.Sprintf("%v", v)
+			rfcParams[k] = fmt.Sprintf("%v", v)
 		}
 	}
 
 	// Ensure WebSocket client is connected
 	if err := s.ensureDebugWSClient(ctx); err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v. Ensure ZADT_VSP is deployed and SAPC/SICF are configured.", err)), nil
+		return newToolResultError("CallRFC: WebSocket connect failed: " + err.Error() + ". Ensure ZADT_VSP is deployed and SAPC/SICF are configured."), nil
 	}
 
-	result, err := s.debugWSClient.CallRFC(ctx, function, params)
+	result, err := s.debugWSClient.CallRFC(ctx, function, rfcParams)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("CallRFC failed: %v", err)), nil
+		return wrapErr("CallRFC", err), nil
 	}
 
 	// Format result
