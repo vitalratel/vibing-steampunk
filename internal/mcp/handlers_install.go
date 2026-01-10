@@ -13,6 +13,66 @@ import (
 	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
 
+// --- Install Routing ---
+// Routes for this module:
+//   system: type=install_zadt_vsp, type=install_abapgit, type=list_dependencies, type=install_dummy_test
+
+// routeInstallAction routes install actions.
+// Returns (result, true) if handled, (nil, false) if not handled by this module.
+func (s *Server) routeInstallAction(ctx context.Context, action, _, _ string, params map[string]any) (*mcp.CallToolResult, bool, error) {
+	if action != "system" {
+		return nil, false, nil
+	}
+
+	systemType, _ := params["type"].(string)
+	switch systemType {
+	case "install_zadt_vsp":
+		args := map[string]any{}
+		if pkg, ok := params["package"].(string); ok {
+			args["package"] = pkg
+		}
+		if skipGit, ok := params["skip_git_service"].(bool); ok {
+			args["skip_git_service"] = skipGit
+		}
+		if checkOnly, ok := params["check_only"].(bool); ok {
+			args["check_only"] = checkOnly
+		}
+		result, err := s.handleInstallZADTVSP(ctx, newRequest(args))
+		return result, true, err
+
+	case "install_abapgit":
+		args := map[string]any{}
+		if ed, ok := params["edition"].(string); ok {
+			args["edition"] = ed
+		}
+		if pkg, ok := params["package"].(string); ok {
+			args["package"] = pkg
+		}
+		if checkOnly, ok := params["check_only"].(bool); ok {
+			args["check_only"] = checkOnly
+		}
+		result, err := s.handleInstallAbapGit(ctx, newRequest(args))
+		return result, true, err
+
+	case "list_dependencies":
+		result, err := s.handleListDependencies(ctx, newRequest(nil))
+		return result, true, err
+
+	case "install_dummy_test":
+		args := map[string]any{}
+		if checkOnly, ok := params["check_only"].(bool); ok {
+			args["check_only"] = checkOnly
+		}
+		if cleanup, ok := params["cleanup"].(bool); ok {
+			args["cleanup"] = cleanup
+		}
+		result, err := s.handleInstallDummyTest(ctx, newRequest(args))
+		return result, true, err
+	}
+
+	return nil, false, nil
+}
+
 // --- Install Handlers ---
 
 func (s *Server) handleInstallDummyTest(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -366,7 +426,7 @@ func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolR
 		}
 		err := s.adtClient.CreateObject(ctx, createOpts)
 		if err != nil {
-			return newToolResultError(fmt.Sprintf("Failed to create package: %v", err)), nil
+			return wrapErr("CreateObject(package)", err), nil
 		}
 		fmt.Fprintf(&sb, "  ✓ Package %s created\n\n", packageName)
 	} else {
@@ -519,7 +579,7 @@ func (s *Server) handleInstallAbapGit(ctx context.Context, request mcp.CallToolR
 	}
 
 	if selectedDep == nil {
-		return newToolResultError(fmt.Sprintf("Edition '%s' not found in available dependencies", edition)), nil
+		return newToolResultError("Edition '" + edition + "' not found in available dependencies"), nil
 	}
 
 	if !selectedDep.Available {

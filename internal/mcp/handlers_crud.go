@@ -5,12 +5,255 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
+
+// --- CRUD Routing ---
+// Routes for this module:
+//   edit:    LOCK, UNLOCK, UPDATE_SOURCE, MOVE
+//   create:  OBJECT, DEVC, TABL, CLONE
+//   delete:  OBJECT
+//   read:    CLAS_INFO
+//   analyze: compare_source
+
+// routeCRUDAction routes CRUD operations (lock, unlock, create, update, delete).
+// Returns (result, true) if handled, (nil, false) if not handled by this module.
+func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, objectName string, params map[string]any) (*mcp.CallToolResult, bool, error) {
+	switch action {
+	case "edit":
+		switch objectType {
+		case "LOCK":
+			objectURL, _ := params["object_url"].(string)
+			if objectURL == "" {
+				return newToolResultError("object_url is required in params"), true, nil
+			}
+			args := map[string]any{"object_url": objectURL}
+			if accessMode, ok := params["access_mode"].(string); ok {
+				args["access_mode"] = accessMode
+			}
+			result, err := s.handleLockObject(ctx, newRequest(args))
+			return result, true, err
+
+		case "UNLOCK":
+			objectURL, _ := params["object_url"].(string)
+			lockHandle, _ := params["lock_handle"].(string)
+			if objectURL == "" || lockHandle == "" {
+				return newToolResultError("object_url and lock_handle are required in params"), true, nil
+			}
+			result, err := s.handleUnlockObject(ctx, newRequest(map[string]any{
+				"object_url":  objectURL,
+				"lock_handle": lockHandle,
+			}))
+			return result, true, err
+
+		case "UPDATE_SOURCE":
+			objectURL, _ := params["object_url"].(string)
+			source, _ := params["source"].(string)
+			lockHandle, _ := params["lock_handle"].(string)
+			if objectURL == "" || source == "" || lockHandle == "" {
+				return newToolResultError("object_url, source, and lock_handle are required in params"), true, nil
+			}
+			args := map[string]any{
+				"object_url":  objectURL,
+				"source":      source,
+				"lock_handle": lockHandle,
+			}
+			if transport, ok := params["transport"].(string); ok {
+				args["transport"] = transport
+			}
+			result, err := s.handleUpdateSource(ctx, newRequest(args))
+			return result, true, err
+
+		case "MOVE":
+			objType, _ := params["object_type"].(string)
+			objName := objectName
+			if objName == "" {
+				objName, _ = params["object_name"].(string)
+			}
+			newPackage, _ := params["new_package"].(string)
+			if objType == "" || objName == "" || newPackage == "" {
+				return newToolResultError("object_type, object_name, and new_package are required"), true, nil
+			}
+			result, err := s.handleMoveObject(ctx, newRequest(map[string]any{
+				"object_type": objType,
+				"object_name": objName,
+				"new_package": newPackage,
+			}))
+			return result, true, err
+		}
+
+	case "create":
+		switch objectType {
+		case "OBJECT":
+			objType, _ := params["object_type"].(string)
+			name := objectName
+			if name == "" {
+				name, _ = params["name"].(string)
+			}
+			description, _ := params["description"].(string)
+			packageName, _ := params["package_name"].(string)
+			if objType == "" || name == "" || description == "" || packageName == "" {
+				return newToolResultError("object_type, name, description, and package_name are required"), true, nil
+			}
+			args := map[string]any{
+				"object_type":  objType,
+				"name":         name,
+				"description":  description,
+				"package_name": packageName,
+			}
+			if transport, ok := params["transport"].(string); ok {
+				args["transport"] = transport
+			}
+			if parent, ok := params["parent_name"].(string); ok {
+				args["parent_name"] = parent
+			}
+			if sd, ok := params["service_definition"].(string); ok {
+				args["service_definition"] = sd
+			}
+			if bv, ok := params["binding_version"].(string); ok {
+				args["binding_version"] = bv
+			}
+			if bc, ok := params["binding_category"].(string); ok {
+				args["binding_category"] = bc
+			}
+			result, err := s.handleCreateObject(ctx, newRequest(args))
+			return result, true, err
+
+		case "DEVC":
+			name := objectName
+			if name == "" {
+				name, _ = params["name"].(string)
+			}
+			description, _ := params["description"].(string)
+			if name == "" || description == "" {
+				return newToolResultError("name and description are required"), true, nil
+			}
+			args := map[string]any{
+				"name":        name,
+				"description": description,
+			}
+			if parent, ok := params["parent"].(string); ok {
+				args["parent"] = parent
+			}
+			result, err := s.handleCreatePackage(ctx, newRequest(args))
+			return result, true, err
+
+		case "TABL":
+			name := objectName
+			if name == "" {
+				name, _ = params["name"].(string)
+			}
+			description, _ := params["description"].(string)
+			fields, _ := params["fields"].(string)
+			if name == "" || description == "" || fields == "" {
+				return newToolResultError("name, description, and fields (JSON) are required"), true, nil
+			}
+			args := map[string]any{
+				"name":        name,
+				"description": description,
+				"fields":      fields,
+			}
+			if pkg, ok := params["package"].(string); ok {
+				args["package"] = pkg
+			}
+			if transport, ok := params["transport"].(string); ok {
+				args["transport"] = transport
+			}
+			if dc, ok := params["delivery_class"].(string); ok {
+				args["delivery_class"] = dc
+			}
+			result, err := s.handleCreateTable(ctx, newRequest(args))
+			return result, true, err
+
+		case "CLONE":
+			objType, _ := params["object_type"].(string)
+			sourceName := objectName
+			if sourceName == "" {
+				sourceName, _ = params["source_name"].(string)
+			}
+			targetName, _ := params["target_name"].(string)
+			pkg, _ := params["package"].(string)
+			if objType == "" || sourceName == "" || targetName == "" || pkg == "" {
+				return newToolResultError("object_type, source_name, target_name, and package are required"), true, nil
+			}
+			result, err := s.handleCloneObject(ctx, newRequest(map[string]any{
+				"object_type": objType,
+				"source_name": sourceName,
+				"target_name": targetName,
+				"package":     pkg,
+			}))
+			return result, true, err
+		}
+
+	case "delete":
+		if objectType == "OBJECT" {
+			objectURL, _ := params["object_url"].(string)
+			lockHandle, _ := params["lock_handle"].(string)
+			if objectURL == "" || lockHandle == "" {
+				return newToolResultError("object_url and lock_handle are required in params"), true, nil
+			}
+			args := map[string]any{
+				"object_url":  objectURL,
+				"lock_handle": lockHandle,
+			}
+			if transport, ok := params["transport"].(string); ok {
+				args["transport"] = transport
+			}
+			result, err := s.handleDeleteObject(ctx, newRequest(args))
+			return result, true, err
+		}
+
+	case "read":
+		if objectType == "CLAS_INFO" {
+			className := objectName
+			if className == "" {
+				className, _ = params["class_name"].(string)
+			}
+			if className == "" {
+				return newToolResultError("class_name is required"), true, nil
+			}
+			result, err := s.handleGetClassInfo(ctx, newRequest(map[string]any{"class_name": className}))
+			return result, true, err
+		}
+
+	case "analyze":
+		analysisType, _ := params["type"].(string)
+		if analysisType == "compare_source" {
+			type1, _ := params["type1"].(string)
+			name1, _ := params["name1"].(string)
+			type2, _ := params["type2"].(string)
+			name2, _ := params["name2"].(string)
+			if type1 == "" || name1 == "" || type2 == "" || name2 == "" {
+				return newToolResultError("type1, name1, type2, and name2 are required in params"), true, nil
+			}
+			args := map[string]any{
+				"type1": type1,
+				"name1": name1,
+				"type2": type2,
+				"name2": name2,
+			}
+			if inc, ok := params["include1"].(string); ok {
+				args["include1"] = inc
+			}
+			if parent, ok := params["parent1"].(string); ok {
+				args["parent1"] = parent
+			}
+			if inc, ok := params["include2"].(string); ok {
+				args["include2"] = inc
+			}
+			if parent, ok := params["parent2"].(string); ok {
+				args["parent2"] = parent
+			}
+			result, err := s.handleCompareSource(ctx, newRequest(args))
+			return result, true, err
+		}
+	}
+
+	return nil, false, nil
+}
 
 // --- CRUD Handlers ---
 
@@ -27,11 +270,9 @@ func (s *Server) handleLockObject(ctx context.Context, request mcp.CallToolReque
 
 	result, err := s.adtClient.LockObject(ctx, objectURL, accessMode)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to lock object: %v", err)), nil
+		return wrapErr("LockObject", err), nil
 	}
-
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(result), nil
 }
 
 func (s *Server) handleUnlockObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -47,9 +288,8 @@ func (s *Server) handleUnlockObject(ctx context.Context, request mcp.CallToolReq
 
 	err := s.adtClient.UnlockObject(ctx, objectURL, lockHandle)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to unlock object: %v", err)), nil
+		return wrapErr("UnlockObject", err), nil
 	}
-
 	return mcp.NewToolResultText("Object unlocked successfully"), nil
 }
 
@@ -82,9 +322,8 @@ func (s *Server) handleUpdateSource(ctx context.Context, request mcp.CallToolReq
 
 	err := s.adtClient.UpdateSource(ctx, sourceURL, source, lockHandle, transport)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to update source: %v", err)), nil
+		return wrapErr("UpdateSource", err), nil
 	}
-
 	return mcp.NewToolResultText("Source updated successfully"), nil
 }
 
@@ -147,17 +386,15 @@ func (s *Server) handleCreateObject(ctx context.Context, request mcp.CallToolReq
 
 	err := s.adtClient.CreateObject(ctx, opts)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to create object: %v", err)), nil
+		return wrapErr("CreateObject", err), nil
 	}
 
 	// Return the object URL for convenience
 	objURL := adt.GetObjectURL(opts.ObjectType, opts.Name, opts.ParentName)
-	result := map[string]string{
+	return newToolResultJSON(map[string]string{
 		"status":     "created",
 		"object_url": objURL,
-	}
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	}), nil
 }
 
 func (s *Server) handleCreatePackage(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -191,7 +428,7 @@ func (s *Server) handleCreatePackage(ctx context.Context, request mcp.CallToolRe
 
 	err := s.adtClient.CreateObject(ctx, opts)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to create package: %v", err)), nil
+		return wrapErr("CreatePackage", err), nil
 	}
 
 	result := map[string]string{
@@ -202,8 +439,7 @@ func (s *Server) handleCreatePackage(ctx context.Context, request mcp.CallToolRe
 	if parent != "" {
 		result["parent"] = parent
 	}
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(result), nil
 }
 
 func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -225,7 +461,7 @@ func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequ
 	// Parse fields JSON
 	var fields []adt.TableField
 	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-		return newToolResultError(fmt.Sprintf("Invalid fields JSON: %v", err)), nil
+		return wrapErr("ParseFieldsJSON", err), nil
 	}
 
 	if len(fields) == 0 {
@@ -259,18 +495,16 @@ func (s *Server) handleCreateTable(ctx context.Context, request mcp.CallToolRequ
 
 	err := s.adtClient.CreateTable(ctx, opts)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to create table: %v", err)), nil
+		return wrapErr("CreateTable", err), nil
 	}
 
-	result := map[string]interface{}{
+	return newToolResultJSON(map[string]any{
 		"status":      "created",
 		"table":       strings.ToUpper(name),
 		"package":     pkg,
 		"description": description,
 		"fields":      len(fields),
-	}
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	}), nil
 }
 
 func (s *Server) handleCompareSource(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -303,11 +537,9 @@ func (s *Server) handleCompareSource(ctx context.Context, request mcp.CallToolRe
 
 	diff, err := s.adtClient.CompareSource(ctx, type1, name1, type2, name2, opts1, opts2)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("CompareSource failed: %v", err)), nil
+		return wrapErr("CompareSource", err), nil
 	}
-
-	output, _ := json.MarshalIndent(diff, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(diff), nil
 }
 
 func (s *Server) handleCloneObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -322,11 +554,9 @@ func (s *Server) handleCloneObject(ctx context.Context, request mcp.CallToolRequ
 
 	result, err := s.adtClient.CloneObject(ctx, objectType, sourceName, targetName, pkg)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("CloneObject failed: %v", err)), nil
+		return wrapErr("CloneObject", err), nil
 	}
-
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(result), nil
 }
 
 func (s *Server) handleGetClassInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -337,11 +567,9 @@ func (s *Server) handleGetClassInfo(ctx context.Context, request mcp.CallToolReq
 
 	info, err := s.adtClient.GetClassInfo(ctx, className)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("GetClassInfo failed: %v", err)), nil
+		return wrapErr("GetClassInfo", err), nil
 	}
-
-	output, _ := json.MarshalIndent(info, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(info), nil
 }
 
 func (s *Server) handleDeleteObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -362,9 +590,8 @@ func (s *Server) handleDeleteObject(ctx context.Context, request mcp.CallToolReq
 
 	err := s.adtClient.DeleteObject(ctx, objectURL, lockHandle, transport)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to delete object: %v", err)), nil
+		return wrapErr("DeleteObject", err), nil
 	}
-
 	return mcp.NewToolResultText("Object deleted successfully"), nil
 }
 
@@ -386,18 +613,23 @@ func (s *Server) handleMoveObject(ctx context.Context, request mcp.CallToolReque
 
 	// Ensure WebSocket client is connected
 	if err := s.ensureDebugWSClient(ctx); err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to connect to ZADT_VSP WebSocket: %v. Ensure ZADT_VSP is deployed and SAPC/SICF are configured.", err)), nil
+		return wrapErr("ConnectWebSocket", err), nil
 	}
 
 	result, err := s.debugWSClient.MoveObject(ctx, objectType, objectName, newPackage)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("MoveObject failed: %v", err)), nil
+		return wrapErr("MoveObject", err), nil
 	}
 
 	// Format result
 	if result.Success {
-		return mcp.NewToolResultText(fmt.Sprintf("Object moved successfully.\n\nObject: %s %s\nNew Package: %s\nMessage: %s",
-			result.Object, result.ObjName, result.NewPackage, result.Message)), nil
+		return newToolResultJSON(map[string]any{
+			"status":      "success",
+			"object":      result.Object,
+			"object_name": result.ObjName,
+			"new_package": result.NewPackage,
+			"message":     result.Message,
+		}), nil
 	}
-	return newToolResultError(fmt.Sprintf("Move failed: %s", result.Message)), nil
+	return newToolResultError("Move failed: " + result.Message), nil
 }

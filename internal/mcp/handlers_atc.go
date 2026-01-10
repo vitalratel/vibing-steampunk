@@ -4,12 +4,48 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
+
+// --- ATC Routing ---
+// Routes for this module:
+//   system: type=atc_customizing
+//   test: type=atc
+
+// routeATCAction routes ATC actions.
+// Returns (result, true) if handled, (nil, false) if not handled by this module.
+func (s *Server) routeATCAction(ctx context.Context, action, _, _ string, params map[string]any) (*mcp.CallToolResult, bool, error) {
+	switch action {
+	case "system":
+		systemType, _ := params["type"].(string)
+		if systemType == "atc_customizing" {
+			result, err := s.handleGetATCCustomizing(ctx, newRequest(nil))
+			return result, true, err
+		}
+
+	case "test":
+		testType, _ := params["type"].(string)
+		if testType == "atc" {
+			objectURL, _ := params["object_url"].(string)
+			if objectURL == "" {
+				return newToolResultError("object_url is required for ATC check"), true, nil
+			}
+			args := map[string]any{"object_url": objectURL}
+			if variant, ok := params["variant"].(string); ok {
+				args["variant"] = variant
+			}
+			if maxResults, ok := params["max_results"].(float64); ok {
+				args["max_results"] = maxResults
+			}
+			result, err := s.handleRunATCCheck(ctx, newRequest(args))
+			return result, true, err
+		}
+	}
+
+	return nil, false, nil
+}
 
 // --- ATC Handlers ---
 
@@ -31,7 +67,7 @@ func (s *Server) handleRunATCCheck(ctx context.Context, request mcp.CallToolRequ
 
 	result, err := s.adtClient.RunATCCheck(ctx, objectURL, variant, maxResults)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("ATC check failed: %v", err)), nil
+		return wrapErr("RunATCCheck", err), nil
 	}
 
 	// Format output with summary
@@ -63,16 +99,14 @@ func (s *Server) handleRunATCCheck(ctx context.Context, request mcp.CallToolRequ
 	}
 
 	out := output{Summary: sum, Worklist: result}
-	outputJSON, _ := json.MarshalIndent(out, "", "  ")
-	return mcp.NewToolResultText(string(outputJSON)), nil
+	return newToolResultJSON(out), nil
 }
 
-func (s *Server) handleGetATCCustomizing(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleGetATCCustomizing(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	result, err := s.adtClient.GetATCCustomizing(ctx)
 	if err != nil {
-		return newToolResultError(fmt.Sprintf("Failed to get ATC customizing: %v", err)), nil
+		return wrapErr("GetATCCustomizing", err), nil
 	}
 
-	output, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(output)), nil
+	return newToolResultJSON(result), nil
 }
