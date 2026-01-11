@@ -19,24 +19,33 @@ func (s *Server) routeSearchAction(ctx context.Context, action, objectType, obje
 		return nil, false, nil
 	}
 
+	// Build query from target parts or params
+	// Supports: search <query>, search OBJECT <query>, search params.query=<query>
+	var query string
 	switch objectType {
-	case "OBJECT", "":
-		query := objectName
-		if query == "" {
-			query, _ = params["query"].(string)
+	case "OBJECT":
+		query = objectName
+	case "":
+		query, _ = params["query"].(string)
+	default:
+		// Target is the query itself (e.g., "search ZCL_*" -> objectType="ZCL_*")
+		if objectName != "" {
+			query = objectType + " " + objectName
+		} else {
+			query = objectType
 		}
-		if query == "" {
-			return newToolResultError("query is required"), true, nil
-		}
-		args := map[string]any{"query": query}
-		if maxResults, ok := params["maxResults"].(float64); ok {
-			args["maxResults"] = maxResults
-		}
-		result, err := s.handleSearchObject(ctx, newRequest(args))
-		return result, true, err
 	}
 
-	return nil, false, nil
+	if query == "" {
+		return newToolResultError("query is required"), true, nil
+	}
+
+	args := map[string]any{"query": query}
+	if maxResults, ok := params["max_results"].(float64); ok {
+		args["maxResults"] = maxResults
+	}
+	result, err := s.handleSearchObject(ctx, newRequest(args))
+	return result, true, err
 }
 
 // --- Search Handlers ---
