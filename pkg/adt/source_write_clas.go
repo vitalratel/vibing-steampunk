@@ -193,7 +193,16 @@ func (c *Client) updateClass(ctx context.Context, name, source string, opts *Wri
 		}
 	}()
 
-	// Step 3: Update source
+	// Step 3: Update description if provided
+	if opts.Description != "" {
+		err = c.UpdateObjectDescription(ctx, objectURL, ObjectTypeClass, name, opts.Description, lock.LockHandle, opts.Transport)
+		if err != nil {
+			result.Message = fmt.Sprintf("Failed to update description: %v", err)
+			return result, nil
+		}
+	}
+
+	// Step 4: Update source
 	err = c.UpdateSource(ctx, sourceURL, source, lock.LockHandle, opts.Transport)
 	if err != nil {
 		result.Message = fmt.Sprintf("Failed to update source: %v", err)

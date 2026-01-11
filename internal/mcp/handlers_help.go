@@ -40,7 +40,7 @@ Class includes:
   read CLAS_INCLUDE <class> params.include_type=testclasses|locals_def|locals_imp`)
 
 	case "edit":
-		return mcp.NewToolResultText(`EDIT - Modify source code
+		return mcp.NewToolResultText(`EDIT - Modify source code and metadata
 
 High-level (recommended):
   edit CLAS <name>     params.source="..." [params.test_source, params.package, params.description]
@@ -53,6 +53,11 @@ High-level (recommended):
 
   Uses upsert mode: creates if not exists, updates if exists.
   Default package: $TMP
+
+Description-only update (no source change):
+  edit CLAS <name>     params.description="New description"
+  edit INTF <name>     params.description="New description"
+  edit PROG <name>     params.description="New description"
 
 Low-level (for fine control):
   edit LOCK            params.object_url="/sap/bc/adt/..." → returns lock_handle
@@ -173,13 +178,15 @@ func getUnhandledErrorMessage(action, objectType, objectName string) string {
 	switch action {
 	case "edit":
 		switch objectType {
-		case "CLAS", "INTF", "PROG", "DDLS", "BDEF", "SRVD", "SRVB":
+		case "CLAS", "INTF", "PROG":
+			fmt.Fprintf(&sb, "Did you forget params.source or params.description? Try:\n  edit %s %s params.source=\"...\"\n  edit %s %s params.description=\"...\"", objectType, objectName, objectType, objectName)
+		case "DDLS", "BDEF", "SRVD", "SRVB":
 			fmt.Fprintf(&sb, "Did you forget params.source? Try:\n  edit %s %s params.source=\"...\"", objectType, objectName)
 		case "":
-			sb.WriteString("Missing target. Examples:\n  edit CLAS ZCL_TEST params.source=\"...\"\n  edit LOCK params.object_url=\"...\"")
+			sb.WriteString("Missing target. Examples:\n  edit CLAS ZCL_TEST params.source=\"...\"\n  edit CLAS ZCL_TEST params.description=\"...\"\n  edit LOCK params.object_url=\"...\"")
 		default:
 			fmt.Fprintf(&sb, "Unknown edit target '%s'. Valid targets:\n", objectType)
-			sb.WriteString("  High-level: CLAS, INTF, PROG, DDLS, BDEF, SRVD, SRVB (with params.source)\n")
+			sb.WriteString("  High-level: CLAS, INTF, PROG, DDLS, BDEF, SRVD, SRVB (with params.source or params.description)\n")
 			sb.WriteString("  Low-level: LOCK, UNLOCK, UPDATE_SOURCE, MOVE")
 		}
 

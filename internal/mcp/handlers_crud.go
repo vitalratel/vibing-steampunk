@@ -86,13 +86,22 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 				return newToolResultError("object name is required"), true, nil
 			}
 			source := getStr(params, "source")
+			description := getStr(params, "description")
+
+			// Description-only update (no source provided)
+			if source == "" && description != "" {
+				result, err := s.updateDescriptionOnly(ctx, objectType, objectName, description, getStr(params, "transport"))
+				return result, true, err
+			}
+
+			// Source update (with optional description)
 			if source == "" {
-				return newToolResultError("source is required in params"), true, nil
+				return newToolResultError("source or description is required in params"), true, nil
 			}
 			opts := &adt.WriteSourceOptions{
 				Mode:        adt.WriteModeUpsert,
 				Package:     getStr(params, "package"),
-				Description: getStr(params, "description"),
+				Description: description,
 				Transport:   getStr(params, "transport"),
 				TestSource:  getStr(params, "test_source"),
 			}
@@ -240,6 +249,53 @@ func (s *Server) routeCRUDAction(ctx context.Context, action, objectType, object
 }
 
 // --- CRUD Handlers ---
+
+// updateDescriptionOnly updates only the description of an existing object (no source change).
+func (s *Server) updateDescriptionOnly(ctx context.Context, objectType, objectName, description, transport string) (*mcp.CallToolResult, error) {
+	// Map short type to CreatableObjectType
+	var creatableType adt.CreatableObjectType
+	switch objectType {
+	case "CLAS":
+		creatableType = adt.ObjectTypeClass
+	case "INTF":
+		creatableType = adt.ObjectTypeInterface
+	case "PROG":
+		creatableType = adt.ObjectTypeProgram
+	default:
+		return newToolResultError("description-only update not supported for " + objectType), nil
+	}
+
+	objectURL := adt.GetObjectURL(creatableType, objectName, "")
+	if objectURL == "" {
+		return newToolResultError("failed to get object URL"), nil
+	}
+
+	// Lock
+	lock, err := s.adtClient.LockObject(ctx, objectURL, "MODIFY")
+	if err != nil {
+		return wrapErr("LockObject", err), nil
+	}
+
+	// Update description
+	err = s.adtClient.UpdateObjectDescription(ctx, objectURL, creatableType, strings.ToUpper(objectName), description, lock.LockHandle, transport)
+	if err != nil {
+		_ = s.adtClient.UnlockObject(ctx, objectURL, lock.LockHandle)
+		return wrapErr("UpdateObjectDescription", err), nil
+	}
+
+	// Unlock
+	err = s.adtClient.UnlockObject(ctx, objectURL, lock.LockHandle)
+	if err != nil {
+		return wrapErr("UnlockObject", err), nil
+	}
+
+	return newToolResultJSON(map[string]any{
+		"status":      "updated",
+		"object_type": objectType,
+		"object_name": strings.ToUpper(objectName),
+		"description": description,
+	}), nil
+}
 
 func (s *Server) handleLockObject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := request.Params.Arguments
