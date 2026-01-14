@@ -14,7 +14,7 @@ import (
 
 // --- Debugger Routing ---
 // Routes for this module:
-//   debug: set_breakpoint, get_breakpoints, delete_breakpoint, call_rfc, setup
+//   debug: set_breakpoint, get_breakpoints, delete_breakpoint, call_rfc, run_report, setup
 
 // routeDebuggerAction routes debugger-specific actions.
 // Returns (result, true) if handled, (nil, false) if not handled by this module.
@@ -23,9 +23,11 @@ func (s *Server) routeDebuggerAction(ctx context.Context, action, objectType, ob
 		return nil, false, nil
 	}
 
-	debugType := objectType
+	debugType := strings.ToLower(objectType)
 	if debugType == "" {
-		debugType, _ = params["type"].(string)
+		if t, ok := params["type"].(string); ok {
+			debugType = strings.ToLower(t)
+		}
 	}
 
 	switch debugType {
@@ -78,6 +80,42 @@ func (s *Server) routeDebuggerAction(ctx context.Context, action, objectType, ob
 			args["params"] = rfcParams
 		}
 		result, err := s.handleCallRFC(ctx, newRequest(args))
+		return result, true, err
+
+	case "run_report":
+		report, _ := params["report"].(string)
+		if report == "" {
+			return newToolResultError("report is required for run_report"), true, nil
+		}
+		args := map[string]any{"report": report}
+		if variant, ok := params["variant"].(string); ok {
+			args["variant"] = variant
+		}
+		result, err := s.handleDebugRunReport(ctx, newRequest(args))
+		return result, true, err
+
+	case "classrun", "run_class":
+		className, _ := params["class"].(string)
+		if className == "" {
+			className = objectName
+		}
+		if className == "" {
+			return newToolResultError("class is required for classrun"), true, nil
+		}
+		result, err := s.handleDebugClassrun(ctx, className)
+		return result, true, err
+
+	// HTTP breakpoints (CL_ABAP_DEBUGGER - writes to ABDBG_BPS, checked by HTTP execution)
+	case "set_http_breakpoint", "sethttpbreakpoint":
+		result, err := s.handleSetHttpBreakpoint(ctx, params)
+		return result, true, err
+
+	case "get_http_breakpoints", "gethttpbreakpoints":
+		result, err := s.handleGetHttpBreakpoints(ctx)
+		return result, true, err
+
+	case "delete_http_breakpoints", "deletehttpbreakpoints":
+		result, err := s.handleDeleteHttpBreakpoints(ctx)
 		return result, true, err
 	}
 
@@ -333,4 +371,168 @@ func (s *Server) handleCallRFC(ctx context.Context, request mcp.CallToolRequest)
 	// Format result
 	resultJSON, _ := json.MarshalIndent(result, "", "  ")
 	return mcp.NewToolResultText(fmt.Sprintf("RFC call completed.\n\nFunction: %s\nSubrc: %d\n\nResult:\n%s", function, result.Subrc, string(resultJSON))), nil
+}
+
+// handleDebugRunReport triggers report execution via WebSocket for debugging.
+// This schedules a background job that CAN hit external breakpoints, then returns immediately.
+// Use with DebuggerListen to catch the debuggee when it hits a breakpoint.
+func (s *Server) handleDebugRunReport(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	report, ok := request.Params.Arguments["report"].(string)
+	if !ok || report == "" {
+		return newToolResultError("report is required"), nil
+	}
+
+	variant, _ := request.Params.Arguments["variant"].(string)
+
+	// Ensure WebSocket client is connected
+	if err := s.ensureDebugWSClient(ctx); err != nil {
+		return newToolResultError("RunReport: WebSocket connect failed: " + err.Error() + ". Ensure ZADT_VSP is deployed and SAPC/SICF are configured."), nil
+	}
+
+	// Trigger async execution - this schedules a background job that runs in a separate
+	// work process and CAN hit external breakpoints
+	err := s.debugWSClient.RunReport(ctx, report, variant)
+	if err != nil {
+		return wrapErr("RunReport", err), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Report execution triggered for debugging.\n\n")
+	fmt.Fprintf(&sb, "Report: %s\n", report)
+	if variant != "" {
+		fmt.Fprintf(&sb, "Variant: %s\n", variant)
+	}
+	sb.WriteString("\nThe report is scheduled as a background job in a separate work process.\n")
+	sb.WriteString("If it hits a breakpoint, DebuggerListen will catch the debuggee.\n\n")
+	sb.WriteString("Recommended workflow:\n")
+	sb.WriteString("1. Set breakpoint: debug set_breakpoint with program/line\n")
+	sb.WriteString("2. Trigger execution: debug run_report (this action)\n")
+	sb.WriteString("3. Wait for debuggee: debug listen\n")
+	sb.WriteString("4. Attach: debug attach with debuggee_id\n")
+
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+// handleDebugClassrun executes a class via ADT classrun endpoint.
+// This runs in ICF dialog context and WILL check external breakpoints.
+func (s *Server) handleDebugClassrun(ctx context.Context, className string) (*mcp.CallToolResult, error) {
+	result, err := s.adtClient.RunClassrun(ctx, className)
+	if err != nil {
+		return wrapErr("RunClassrun", err), nil
+	}
+
+	if !result.Success {
+		return newToolResultError(fmt.Sprintf("Classrun failed: %s", result.Message)), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Class executed via ADT classrun endpoint.\n\n")
+	fmt.Fprintf(&sb, "Class: %s\n", result.ClassName)
+	fmt.Fprintf(&sb, "Status: HTTP %d\n\n", result.StatusCode)
+
+	if result.Output != "" {
+		sb.WriteString("Output:\n")
+		sb.WriteString(result.Output)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\nThis ran in ICF dialog context - external breakpoints SHOULD have been checked.\n")
+	sb.WriteString("If breakpoint was hit, use 'debug listen' to catch the debuggee.\n")
+
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+// --- HTTP Breakpoint Handlers (CL_ABAP_DEBUGGER - writes to ABDBG_BPS) ---
+// These breakpoints are checked by HTTP-triggered execution (unlike TPDAPI which writes to ABDBG_EXTDBPS).
+
+func (s *Server) handleSetHttpBreakpoint(ctx context.Context, params map[string]any) (*mcp.CallToolResult, error) {
+	program, _ := params["program"].(string)
+	if program == "" {
+		return newToolResultError("program is required for HTTP breakpoint"), nil
+	}
+
+	line, _ := params["line"].(float64)
+	if line <= 0 {
+		return newToolResultError("line is required and must be positive for HTTP breakpoint"), nil
+	}
+
+	// Method is required for classes to resolve include name
+	method, _ := params["method"].(string)
+
+	// Ensure WebSocket client is connected
+	if err := s.ensureDebugWSClient(ctx); err != nil {
+		return newToolResultError("SetHttpBreakpoint: WebSocket connect failed: " + err.Error()), nil
+	}
+
+	result, err := s.debugWSClient.SetHttpBreakpoint(ctx, program, int(line), method)
+	if err != nil {
+		return wrapErr("SetHttpBreakpoint", err), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("HTTP breakpoint set via CL_ABAP_DEBUGGER.\n\n")
+	fmt.Fprintf(&sb, "Program: %s\n", program)
+	if method != "" {
+		fmt.Fprintf(&sb, "Method: %s\n", method)
+	}
+	fmt.Fprintf(&sb, "Line: %.0f\n", line)
+	sb.WriteString("Table: ABDBG_BPS (checked by HTTP execution)\n\n")
+
+	if saved, ok := result["saved"].(bool); ok && saved {
+		sb.WriteString("✓ Breakpoint saved successfully.\n")
+	}
+
+	sb.WriteString("\nThis breakpoint type is checked by HTTP-triggered execution (classrun, REST calls).\n")
+	sb.WriteString("Compare with: debug set_breakpoint (TPDAPI → ABDBG_EXTDBPS, Eclipse ADT style)\n")
+
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleGetHttpBreakpoints(ctx context.Context) (*mcp.CallToolResult, error) {
+	// Ensure WebSocket client is connected
+	if err := s.ensureDebugWSClient(ctx); err != nil {
+		return newToolResultError("GetHttpBreakpoints: WebSocket connect failed: " + err.Error()), nil
+	}
+
+	result, err := s.debugWSClient.GetHttpBreakpoints(ctx)
+	if err != nil {
+		return wrapErr("GetHttpBreakpoints", err), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("HTTP Breakpoints (ABDBG_BPS table):\n\n")
+
+	if count, ok := result["count"].(float64); ok {
+		fmt.Fprintf(&sb, "Total: %.0f breakpoint(s)\n\n", count)
+	}
+	if bps, ok := result["breakpoints"].([]any); ok {
+		for i, bp := range bps {
+			if bpMap, ok := bp.(map[string]any); ok {
+				fmt.Fprintf(&sb, "%d. Program: %v, Line: %v\n", i+1, bpMap["program"], bpMap["line"])
+			}
+		}
+	}
+
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleDeleteHttpBreakpoints(ctx context.Context) (*mcp.CallToolResult, error) {
+	// Ensure WebSocket client is connected
+	if err := s.ensureDebugWSClient(ctx); err != nil {
+		return newToolResultError("DeleteHttpBreakpoints: WebSocket connect failed: " + err.Error()), nil
+	}
+
+	result, err := s.debugWSClient.DeleteHttpBreakpoints(ctx)
+	if err != nil {
+		return wrapErr("DeleteHttpBreakpoints", err), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("HTTP breakpoints deleted.\n\n")
+
+	if deleted, ok := result["deleted"].(bool); ok && deleted {
+		sb.WriteString("✓ All HTTP breakpoints for current user have been removed from ABDBG_BPS.\n")
+	}
+
+	return mcp.NewToolResultText(sb.String()), nil
 }

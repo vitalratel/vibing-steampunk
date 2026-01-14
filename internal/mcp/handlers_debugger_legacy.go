@@ -23,9 +23,11 @@ func (s *Server) routeDebuggerLegacyAction(ctx context.Context, action, objectTy
 		return nil, false, nil
 	}
 
-	debugType := objectType
+	debugType := strings.ToLower(objectType)
 	if debugType == "" {
-		debugType, _ = params["type"].(string)
+		if t, ok := params["type"].(string); ok {
+			debugType = strings.ToLower(t)
+		}
 	}
 
 	switch debugType {

@@ -207,15 +207,13 @@ ENDCLASS.
 				result.RawAlerts = append(result.RawAlerts, alert)
 
 				// Look for our EXEC_RESULT marker in the alert title
-				if strings.HasPrefix(alert.Title, "EXEC_RESULT:") {
-					output := strings.TrimPrefix(alert.Title, "EXEC_RESULT:")
+				if output, found := strings.CutPrefix(alert.Title, "EXEC_RESULT:"); found {
 					result.Output = append(result.Output, output)
 				}
 
 				// Also check details for additional output
 				for _, detail := range alert.Details {
-					if strings.HasPrefix(detail, "EXEC_RESULT:") {
-						output := strings.TrimPrefix(detail, "EXEC_RESULT:")
+					if output, found := strings.CutPrefix(detail, "EXEC_RESULT:"); found {
 						result.Output = append(result.Output, output)
 					}
 				}
@@ -268,4 +266,59 @@ func (c *Client) ExecuteABAPMultiple(ctx context.Context, code string, opts *Exe
 `
 
 	return c.ExecuteABAP(ctx, wrappedCode, opts)
+}
+
+// --- Execute via ADT Classrun Endpoint ---
+
+// ClassrunResult represents the result of running a class via ADT classrun.
+type ClassrunResult struct {
+	Success    bool   `json:"success"`
+	ClassName  string `json:"className"`
+	Output     string `json:"output"`
+	StatusCode int    `json:"statusCode"`
+	Message    string `json:"message,omitempty"`
+}
+
+// RunClassrun executes a class implementing if_oo_adt_classrun via ADT REST endpoint.
+// This runs in ICF dialog context and WILL check external breakpoints.
+//
+// The class must implement if_oo_adt_classrun interface.
+// Endpoint: POST /sap/bc/adt/oo/classrun/{className}
+//
+// This is the recommended way to trigger code execution for debugging,
+// as it runs in a dialog work process (unlike background jobs which use BTC).
+func (c *Client) RunClassrun(ctx context.Context, className string) (*ClassrunResult, error) {
+	if className == "" {
+		return nil, fmt.Errorf("className is required")
+	}
+
+	className = strings.ToUpper(className)
+	path := fmt.Sprintf("/sap/bc/adt/oo/classrun/%s", className)
+
+	resp, err := c.transport.Request(ctx, path, &RequestOptions{
+		Method:      "POST",
+		ContentType: "text/plain",
+		Accept:      "text/plain",
+	})
+
+	result := &ClassrunResult{
+		ClassName: className,
+	}
+
+	if err != nil {
+		result.Message = fmt.Sprintf("Request failed: %v", err)
+		return result, nil
+	}
+
+	result.StatusCode = resp.StatusCode
+	result.Output = string(resp.Body)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Success = true
+		result.Message = "Execution completed"
+	} else {
+		result.Message = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(resp.Body))
+	}
+
+	return result, nil
 }
