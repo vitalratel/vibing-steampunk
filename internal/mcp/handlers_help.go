@@ -150,11 +150,58 @@ Example:
 	case "debug":
 		return mcp.NewToolResultText(`DEBUG - Debugging operations
 
-  debug ATTACH         params.terminal_id
-  debug DETACH
-  debug STEP           params.type=into|over|out|continue
-  debug VARIABLES      [params.stack_level]
-  debug BREAKPOINT     params.action=set|delete, params.uri, params.line`)
+TWO BREAKPOINT MECHANISMS:
+
+1. TPDAPI Breakpoints (ABDBG_EXTDBPS table - Eclipse ADT style):
+  debug set_breakpoint     params.program, params.line [params.kind, params.method]
+  debug get_breakpoints    - List TPDAPI breakpoints
+  debug delete_breakpoint  <breakpoint_id>
+  → Checked by: Eclipse ADT (RFC), SAP GUI with external debugging enabled
+  → Use with: listen/attach for REST-based debugging
+
+2. HTTP Breakpoints (ABDBG_BPS table - CL_ABAP_DEBUGGER):
+  debug set_http_breakpoint   params.program, params.line, params.method (required for classes)
+  debug get_http_breakpoints  - List HTTP breakpoints
+  debug delete_http_breakpoints - Delete all HTTP breakpoints
+  → Checked by: HTTP execution (classrun, REST calls, unit tests via HTTP)
+  → Opens: SAP GUI debugger directly (not REST session)
+
+Code execution:
+  debug classrun <class>   - Execute via ADT classrun endpoint
+  debug run_report         params.report [params.variant] - Trigger via background job
+
+RFC (WebSocket):
+  debug call_rfc           params.function [params.params (JSON)]
+
+REST debug session (for TPDAPI breakpoints only):
+  debug listen             [params.user, params.timeout] - Wait for debuggee
+  debug attach             params.debuggee_id - Attach to debuggee
+  debug detach             - Detach from session
+  debug step               params.step_type=stepInto|stepOver|stepReturn|stepContinue
+  debug get_stack          - Show call stack
+  debug get_variables      [params.variable_ids] - Inspect variables
+
+WORKFLOW - HTTP Breakpoints (SAP GUI):
+  1. Set breakpoint:
+     debug set_http_breakpoint params.program="ZCL_TEST" params.method="MY_METHOD" params.line=5
+  2. Verify: debug get_http_breakpoints
+  3. Trigger: debug classrun ZCL_TEST
+  4. SAP GUI debugger opens automatically at the breakpoint
+  Note: For classes, params.method is REQUIRED to resolve the include name.
+        Line number is relative to method start (line 1 = first line of method).
+
+WORKFLOW - TPDAPI Breakpoints (REST session):
+  1. Set breakpoint: debug set_breakpoint params.program="ZPROG" params.line=10
+  2. Listen: debug listen params.timeout=60
+  3. (Trigger execution in another session)
+  4. Attach: debug attach params.debuggee_id="<from listen>"
+  5. Step: debug step params.step_type="stepOver"
+
+BREAKPOINT TABLE COMPARISON:
+  | Type | Table | Set via | Debugger |
+  |------|-------|---------|----------|
+  | TPDAPI | ABDBG_EXTDBPS | set_breakpoint | REST (listen/attach) |
+  | HTTP | ABDBG_BPS | set_http_breakpoint | SAP GUI (auto-opens) |`)
 
 	default:
 		return mcp.NewToolResultText(`SAP ABAP Development Tool
