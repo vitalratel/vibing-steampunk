@@ -17,7 +17,8 @@ import (
 // IMPORTANT: This must be deterministic across MCP tool calls since each call
 // may be a separate process. We use a fixed ID based on the username.
 var (
-	terminalIDUser string // Set via SetTerminalIDUser for deterministic ID
+	terminalIDUser   string // Set via SetTerminalIDUser for deterministic ID
+	terminalIDCustom string // Set via SetTerminalID for SAP GUI compatibility
 )
 
 // SetTerminalIDUser sets the username used to generate a deterministic terminal ID.
@@ -27,19 +28,30 @@ func SetTerminalIDUser(user string) {
 	terminalIDUser = user
 }
 
+// SetTerminalID sets a custom terminal ID (e.g., from SAP GUI).
+// Use the same ID as SAP GUI to enable cross-tool breakpoint sharing.
+// SAP GUI stores this in: Windows Registry HKCU\Software\SAP\ABAP Debugging\TerminalID
+// or on Linux/Mac: ~/.SAP/ABAPDebugging/terminalId
+func SetTerminalID(id string) {
+	terminalIDCustom = id
+}
+
 // getTerminalID returns a terminal ID for this vsp session.
-// Returns a deterministic ID based on the configured username.
-// This ensures the same terminal ID across all MCP tool calls.
+// Priority: 1) Custom ID (SAP GUI), 2) User-based ID, 3) Default
 func getTerminalID() string {
+	// 1. Use custom terminal ID if set (for SAP GUI compatibility)
+	if terminalIDCustom != "" {
+		return terminalIDCustom
+	}
+	// 2. Deterministic: use hash of username for consistent ID across processes
 	if terminalIDUser != "" {
-		// Deterministic: use hash of username for consistent ID across processes
 		h := make([]byte, 8)
 		for i, c := range terminalIDUser {
 			h[i%8] ^= byte(c)
 		}
 		return "vsp-" + hex.EncodeToString(h)
 	}
-	// Fixed default - better than random for MCP scenarios
+	// 3. Fixed default - better than random for MCP scenarios
 	return "vsp-mcp-default"
 }
 

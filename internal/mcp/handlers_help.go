@@ -7,13 +7,21 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/oisee/vibing-steampunk/pkg/adt"
 )
 
 // handleHelp returns documentation for the SAP tool
 func handleHelp(target string) *mcp.CallToolResult {
-	target = strings.ToLower(strings.TrimSpace(target))
+	target = strings.TrimSpace(target)
+	targetLower := strings.ToLower(target)
 
-	switch target {
+	// Handle "ABAP <keyword>" for ABAP language help
+	if strings.HasPrefix(targetLower, "abap ") {
+		keyword := strings.TrimSpace(target[5:])
+		return handleAbapKeywordHelp(keyword)
+	}
+
+	switch targetLower {
 	case "read":
 		return mcp.NewToolResultText(`READ - Retrieve source code and metadata
 
@@ -147,6 +155,20 @@ Example:
 
   grep <pattern>       params.package="ZPACKAGE" [params.object_type, params.max_results]`)
 
+	case "abap":
+		return mcp.NewToolResultText(`ABAP - ABAP language help
+
+  help ABAP <keyword>  - Get help URL and search query for ABAP keyword
+
+Examples:
+  help ABAP SELECT     - SELECT statement documentation
+  help ABAP LOOP       - LOOP statement documentation
+  help ABAP DATA       - DATA statement documentation
+
+Returns:
+  - URL to SAP Help Portal
+  - Search query to use with web search for detailed documentation`)
+
 	case "debug":
 		return mcp.NewToolResultText(`DEBUG - Debugging operations
 
@@ -228,6 +250,33 @@ COMMON PATTERNS:
 
 Run 'help <action>' for detailed documentation, e.g., 'help edit'`)
 	}
+}
+
+// handleAbapKeywordHelp returns help information for an ABAP keyword
+func handleAbapKeywordHelp(keyword string) *mcp.CallToolResult {
+	if keyword == "" {
+		return mcp.NewToolResultText(`ABAP keyword help requires a keyword.
+
+Examples:
+  help ABAP SELECT
+  help ABAP LOOP
+  help ABAP DATA
+  help ABAP METHOD`)
+	}
+
+	url := adt.GetAbapHelpURL(keyword)
+	query := adt.FormatAbapHelpQuery(keyword)
+
+	return mcp.NewToolResultText(fmt.Sprintf(`ABAP Keyword: %s
+
+Documentation URL:
+  %s
+
+Search Query (for web search):
+  %s
+
+Tip: Use the search query with a web search tool to get detailed, AI-readable documentation.`,
+		strings.ToUpper(keyword), url, query))
 }
 
 // getUnhandledErrorMessage returns a helpful error message with suggestions
