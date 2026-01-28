@@ -269,7 +269,7 @@ func (c *Client) GetTransport(ctx context.Context, number string) (*TransportDet
 
 	resp, err := c.transport.Request(ctx, path, &RequestOptions{
 		Method: http.MethodGet,
-		Accept: "application/vnd.sap.adt.transportrequests.v1+xml",
+		Accept: "application/vnd.sap.adt.transportorganizer.v1+xml",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("getting transport %s: %w", number, err)
@@ -462,7 +462,7 @@ func (c *Client) ReleaseTransport(ctx context.Context, number string, opts Relea
 
 	_, err := c.transport.Request(ctx, path, &RequestOptions{
 		Method: http.MethodPost,
-		Accept: "application/vnd.sap.adt.transportrequests.v1+xml",
+		Accept: "application/vnd.sap.adt.transportorganizer.v1+xml",
 	})
 	if err != nil {
 		return fmt.Errorf("releasing transport %s: %w", number, err)
@@ -485,6 +485,7 @@ func (c *Client) DeleteTransport(ctx context.Context, number string) error {
 
 	_, err := c.transport.Request(ctx, path, &RequestOptions{
 		Method: http.MethodDelete,
+		Accept: "application/vnd.sap.adt.transportorganizer.v1+xml",
 	})
 	if err != nil {
 		return fmt.Errorf("deleting transport %s: %w", number, err)
