@@ -208,6 +208,7 @@ func (c *Config) NewHTTPClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
 
 	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: c.InsecureSkipVerify,
 		},
