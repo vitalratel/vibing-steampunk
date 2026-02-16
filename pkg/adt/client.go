@@ -109,12 +109,11 @@ func (c *Client) GetClassSource(ctx context.Context, className string) (string, 
 	return sources["main"], nil
 }
 
-// GetClassMethods retrieves the list of methods in a class with their source line boundaries.
-// This is useful for method-level source operations (GetSource with method, EditSource with method).
-func (c *Client) GetClassMethods(ctx context.Context, className string) ([]MethodInfo, error) {
+// GetClassStructure retrieves the full object structure of a class (methods, attributes, types).
+// Uses the standard /objectstructure endpoint which works on all SAP systems.
+func (c *Client) GetClassStructure(ctx context.Context, className string) (*ClassObjectStructure, error) {
 	className = strings.ToUpper(className)
 
-	// Fetch objectstructure endpoint
 	path := fmt.Sprintf("/sap/bc/adt/oo/classes/%s/objectstructure", url.PathEscape(className))
 	resp, err := c.transport.Request(ctx, path, &RequestOptions{
 		Method: http.MethodGet,
@@ -127,6 +126,17 @@ func (c *Client) GetClassMethods(ctx context.Context, className string) ([]Metho
 	structure, err := ParseClassObjectStructure(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parsing class object structure: %w", err)
+	}
+
+	return structure, nil
+}
+
+// GetClassMethods retrieves the list of methods in a class with their source line boundaries.
+// This is useful for method-level source operations (GetSource with method, EditSource with method).
+func (c *Client) GetClassMethods(ctx context.Context, className string) ([]MethodInfo, error) {
+	structure, err := c.GetClassStructure(ctx, className)
+	if err != nil {
+		return nil, err
 	}
 
 	return structure.GetMethods(), nil

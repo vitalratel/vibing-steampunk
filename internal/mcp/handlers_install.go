@@ -337,7 +337,7 @@ func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolR
 	// Check if package exists
 	packageExists := false
 	pkg, err := s.adtClient.GetPackage(ctx, packageName, nil)
-	if err == nil && (pkg.URI != "" || pkg.Name != "" || pkg.TotalObjects > 0) {
+	if err == nil && (pkg.URI != "" || pkg.TotalObjects > 0) {
 		packageExists = true
 		fmt.Fprintf(&sb, "  ✓ Package %s exists (%d objects)\n", packageName, pkg.TotalObjects)
 	} else {
@@ -420,13 +420,17 @@ func (s *Server) handleInstallZADTVSP(ctx context.Context, request mcp.CallToolR
 
 		// Use WriteSource to create/update
 		opts := &adt.WriteSourceOptions{
-			Package: packageName,
-			Mode:    adt.WriteModeUpsert,
+			Package:     packageName,
+			Description: obj.Description,
+			Mode:        adt.WriteModeUpsert,
 		}
-		_, err := s.adtClient.WriteSource(ctx, obj.Type, obj.Name, obj.Source, opts)
+		wsResult, err := s.adtClient.WriteSource(ctx, obj.Type, obj.Name, obj.Source, opts)
 		if err != nil {
 			fmt.Fprintf(&sb, "✗ Failed: %v\n", err)
 			failed = append(failed, obj.Name+": "+err.Error())
+		} else if wsResult != nil && !wsResult.Success {
+			fmt.Fprintf(&sb, "✗ Failed: %s\n", wsResult.Message)
+			failed = append(failed, obj.Name+": "+wsResult.Message)
 		} else {
 			sb.WriteString("✓ Deployed\n")
 			deployed = append(deployed, obj.Name)

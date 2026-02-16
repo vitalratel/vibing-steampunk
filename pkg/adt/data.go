@@ -206,30 +206,40 @@ func (c *Client) GetTypeInfo(ctx context.Context, typeName string) (*TypeInfo, e
 
 	resp, err := c.transport.Request(ctx, fmt.Sprintf("/sap/bc/adt/ddic/dataelements/%s", typeName), &RequestOptions{
 		Method: http.MethodGet,
-		Accept: "application/xml",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("getting type info: %w", err)
 	}
 
+	// v2 format: <blue:wbobj adtcore:name="..." adtcore:description="..."><dtel:dataElement>...</dtel:dataElement></blue:wbobj>
+	xmlStr := StripXMLNamespaces(string(resp.Body), "blue:", "adtcore:", "dtel:", "atom:")
+
+	type dataElementContent struct {
+		DataType     string `xml:"dataType"`
+		DataLength   string `xml:"dataTypeLength"`
+		DataDecimals string `xml:"dataTypeDecimals"`
+		TypeName     string `xml:"typeName"`
+	}
 	type typeData struct {
-		Name        string `xml:"name,attr"`
-		Type        string `xml:"type,attr"`
-		Description string `xml:"description,attr"`
-		Length      int    `xml:"length,attr"`
-		Decimals    int    `xml:"decimals,attr"`
+		Name        string             `xml:"name,attr"`
+		Description string             `xml:"description,attr"`
+		Content     dataElementContent `xml:"dataElement"`
 	}
 
 	var td typeData
-	if err := xml.Unmarshal(resp.Body, &td); err != nil {
+	if err := xml.Unmarshal([]byte(xmlStr), &td); err != nil {
 		return nil, fmt.Errorf("parsing type info: %w", err)
 	}
 
+	var length, decimals int
+	_, _ = fmt.Sscanf(td.Content.DataLength, "%d", &length)
+	_, _ = fmt.Sscanf(td.Content.DataDecimals, "%d", &decimals)
+
 	return &TypeInfo{
 		Name:        td.Name,
-		Type:        td.Type,
+		Type:        td.Content.DataType,
 		Description: td.Description,
-		Length:      td.Length,
-		Decimals:    td.Decimals,
+		Length:      length,
+		Decimals:    decimals,
 	}, nil
 }

@@ -153,7 +153,8 @@ Example:
 	case "grep":
 		return mcp.NewToolResultText(`GREP - Search code
 
-  grep <pattern>       params.package="ZPACKAGE" [params.object_type, params.max_results]`)
+  grep PACKAGE <name>  params.pattern="<pattern>" [params.object_type, params.max_results]
+  grep OBJECT <url>    params.pattern="<pattern>" [params.case_insensitive, params.context_lines]`)
 
 	case "abap":
 		return mcp.NewToolResultText(`ABAP - ABAP language help

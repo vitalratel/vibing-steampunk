@@ -188,12 +188,7 @@ func (s *Server) handleGetObjectStructure(ctx context.Context, request mcp.CallT
 		return newToolResultError("object_name is required"), nil
 	}
 
-	maxResults := 100
-	if max, ok := request.Params.Arguments["max_results"].(float64); ok && max > 0 {
-		maxResults = int(max)
-	}
-
-	structure, err := s.adtClient.GetObjectStructureCAI(ctx, objectName, maxResults)
+	structure, err := s.adtClient.GetClassStructure(ctx, objectName)
 	if err != nil {
 		return wrapErr("GetObjectStructure", err), nil
 	}

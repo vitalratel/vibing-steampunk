@@ -1060,7 +1060,7 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
     TRY.
         cl_abap_debugger=>read_http_breakpoints(
           EXPORTING
-            main_program           = '*'
+            main_program           = space
             username               = sy-uname
           IMPORTING
             breakpoints            = lt_breakpoints

@@ -1,6 +1,7 @@
 package adt
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -258,6 +259,11 @@ func (c *Client) CodeCompletion(ctx context.Context, sourceURL string, source st
 }
 
 func parseCompletionProposals(data []byte) ([]CompletionProposal, error) {
+	// Empty response means no completions available
+	if len(bytes.TrimSpace(data)) == 0 {
+		return []CompletionProposal{}, nil
+	}
+
 	// Response format is ABAP serialized XML (asx:abap)
 	type completion struct {
 		Kind         int    `xml:"KIND"`

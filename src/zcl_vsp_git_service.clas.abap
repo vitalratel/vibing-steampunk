@@ -59,17 +59,6 @@ CLASS zcl_vsp_git_service DEFINITION
       IMPORTING iv_xstring        TYPE xstring
       RETURNING VALUE(rv_base64)  TYPE string.
 
-    METHODS json_escape
-      IMPORTING iv_string         TYPE string
-      RETURNING VALUE(rv_escaped) TYPE string.
-
-    METHODS build_json_response
-      IMPORTING iv_id            TYPE string
-                iv_success       TYPE abap_bool
-                iv_data          TYPE string OPTIONAL
-                iv_error         TYPE string OPTIONAL
-      RETURNING VALUE(rs_response) TYPE zif_vsp_service=>ty_response.
-
 ENDCLASS.
 
 
@@ -90,10 +79,10 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
       WHEN 'validate'.
         rs_response = handle_validate( is_message ).
       WHEN OTHERS.
-        rs_response = build_json_response(
+        rs_response = zcl_vsp_utils=>build_error(
           iv_id      = is_message-id
-          iv_success = abap_false
-          iv_error   = |Unknown action: { is_message-action }|
+          iv_code    = 'UNKNOWN_ACTION'
+          iv_message = |Unknown action: { is_message-action }|
         ).
     ENDCASE.
   ENDMETHOD.
@@ -119,17 +108,16 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
 
         DATA(lv_data) = |\{"count":{ lines( lt_types ) },"types":[{ lv_types_json }]\}|.
 
-        rs_response = build_json_response(
-          iv_id      = is_message-id
-          iv_success = abap_true
-          iv_data    = lv_data
+        rs_response = zcl_vsp_utils=>build_success(
+          iv_id   = is_message-id
+          iv_data = lv_data
         ).
 
       CATCH cx_root INTO DATA(lx_error).
-        rs_response = build_json_response(
+        rs_response = zcl_vsp_utils=>build_error(
           iv_id      = is_message-id
-          iv_success = abap_false
-          iv_error   = lx_error->get_text( )
+          iv_code    = 'GET_TYPES_FAILED'
+          iv_message = lx_error->get_text( )
         ).
     ENDTRY.
   ENDMETHOD.
@@ -213,10 +201,10 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
         ENDLOOP.
 
         IF lt_tadir IS INITIAL.
-          rs_response = build_json_response(
+          rs_response = zcl_vsp_utils=>build_error(
             iv_id      = is_message-id
-            iv_success = abap_false
-            iv_error   = 'No objects found to export'
+            iv_code    = 'NO_OBJECTS'
+            iv_message = 'No objects found to export'
           ).
           RETURN.
         ENDIF.
@@ -239,17 +227,16 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
 
         DATA(lv_data) = |\{"objectCount":{ lines( lt_tadir ) },"fileCount":{ lines( lt_files ) },"zipBase64":"{ lv_zip_base64 }","files":[{ lv_files_json }]\}|.
 
-        rs_response = build_json_response(
-          iv_id      = is_message-id
-          iv_success = abap_true
-          iv_data    = lv_data
+        rs_response = zcl_vsp_utils=>build_success(
+          iv_id   = is_message-id
+          iv_data = lv_data
         ).
 
       CATCH zcx_abapgit_exception cx_root INTO DATA(lx_error).
-        rs_response = build_json_response(
+        rs_response = zcl_vsp_utils=>build_error(
           iv_id      = is_message-id
-          iv_success = abap_false
-          iv_error   = lx_error->get_text( )
+          iv_code    = 'EXPORT_FAILED'
+          iv_message = lx_error->get_text( )
         ).
     ENDTRY.
   ENDMETHOD.
@@ -257,19 +244,19 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
   METHOD handle_import.
     " TODO: Implement using ZCL_ABAPGIT_OBJECTS=>deserialize
     " Requires creating a virtual repo implementation
-    rs_response = build_json_response(
+    rs_response = zcl_vsp_utils=>build_error(
       iv_id      = is_message-id
-      iv_success = abap_false
-      iv_error   = 'Import not yet implemented - use standard ADT for now'
+      iv_code    = 'NOT_IMPLEMENTED'
+      iv_message = 'Import not yet implemented - use standard ADT for now'
     ).
   ENDMETHOD.
 
   METHOD handle_validate.
     " TODO: Implement using ZCL_ABAPGIT_OBJECTS=>deserialize_checks
-    rs_response = build_json_response(
+    rs_response = zcl_vsp_utils=>build_error(
       iv_id      = is_message-id
-      iv_success = abap_false
-      iv_error   = 'Validate not yet implemented'
+      iv_code    = 'NOT_IMPLEMENTED'
+      iv_message = 'Validate not yet implemented'
     ).
   ENDMETHOD.
 
@@ -315,6 +302,25 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
     CREATE OBJECT lo_zip.
     lo_i18n = zcl_abapgit_i18n_params=>new( ).
 
+    " Add .abapgit.xml repository metadata file (required by abapGit)
+    " Using FULL folder logic for multi-package exports (files organized by package)
+    DATA(lv_abapgit_xml) =
+      |<?xml version="1.0" encoding="utf-8"?>\n| &&
+      |<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">\n| &&
+      | <asx:values>\n| &&
+      |  <DATA>\n| &&
+      |   <MASTER_LANGUAGE>E</MASTER_LANGUAGE>\n| &&
+      |   <STARTING_FOLDER>/src/</STARTING_FOLDER>\n| &&
+      |   <FOLDER_LOGIC>FULL</FOLDER_LOGIC>\n| &&
+      |  </DATA>\n| &&
+      | </asx:values>\n| &&
+      |</asx:abap>\n|.
+
+    lo_zip->add(
+      name    = '.abapgit.xml'
+      content = cl_abap_codepage=>convert_to( lv_abapgit_xml )
+    ).
+
     LOOP AT it_tadir INTO DATA(ls_tadir).
       DATA(ls_item) = VALUE zif_abapgit_definitions=>ty_item(
         obj_type = ls_tadir-object
@@ -329,7 +335,9 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
           ).
 
           LOOP AT ls_serialized-files INTO DATA(ls_file).
-            DATA(lv_path) = |src/{ ls_file-filename }|.
+            " FULL folder logic: src/{package}/{filename}
+            DATA(lv_package) = to_lower( ls_tadir-devclass ).
+            DATA(lv_path) = |src/{ lv_package }/{ ls_file-filename }|.
 
             lo_zip->add(
               name    = lv_path
@@ -370,27 +378,6 @@ CLASS zcl_vsp_git_service IMPLEMENTATION.
         b64data = rv_base64
       EXCEPTIONS
         OTHERS  = 1.
-  ENDMETHOD.
-
-  METHOD json_escape.
-    rv_escaped = iv_string.
-    REPLACE ALL OCCURRENCES OF '\' IN rv_escaped WITH '\\'.
-    REPLACE ALL OCCURRENCES OF '"' IN rv_escaped WITH '\"'.
-    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN rv_escaped WITH '\n'.
-    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN rv_escaped WITH '\n'.
-  ENDMETHOD.
-
-  METHOD build_json_response.
-    rs_response-id = iv_id.
-    rs_response-success = iv_success.
-
-    IF iv_data IS NOT INITIAL.
-      rs_response-data = iv_data.
-    ENDIF.
-
-    IF iv_error IS NOT INITIAL.
-      rs_response-error = |\{"code":"GIT_ERROR","message":"{ json_escape( iv_error ) }"\}|.
-    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

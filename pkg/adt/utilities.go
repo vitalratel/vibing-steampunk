@@ -225,12 +225,6 @@ func (c *Client) GetClassInfo(ctx context.Context, className string) (*ClassInfo
 
 	className = strings.ToUpper(className)
 
-	// Get object structure
-	structure, err := c.GetObjectStructureCAI(ctx, className, 100)
-	if err != nil {
-		return nil, fmt.Errorf("getting class structure: %w", err)
-	}
-
 	info := &ClassInfo{
 		Name:       className,
 		Methods:    make([]string, 0),
@@ -238,44 +232,24 @@ func (c *Client) GetClassInfo(ctx context.Context, className string) (*ClassInfo
 		Interfaces: make([]string, 0),
 	}
 
-	// Parse root node
-	if structure != nil {
-		info.Description = structure.Description
+	structure, err := c.GetClassStructure(ctx, className)
+	if err != nil {
+		return nil, fmt.Errorf("getting class structure: %w", err)
+	}
 
-		// Recursive function to extract info from tree
-		var extractInfo func(node *ObjectExplorerNode)
-		extractInfo = func(node *ObjectExplorerNode) {
-			nodeType := strings.ToUpper(node.Type)
-			nodeName := node.Name
-
-			switch {
-			case strings.Contains(nodeType, "METHOD"):
-				info.Methods = append(info.Methods, nodeName)
-			case strings.Contains(nodeType, "ATTR"):
-				info.Attributes = append(info.Attributes, nodeName)
-			case strings.Contains(nodeType, "INTF"):
-				info.Interfaces = append(info.Interfaces, nodeName)
-			case strings.Contains(nodeType, "TEST"):
-				info.HasTestClass = true
-			}
-
-			// Check for superclass in description
-			if strings.Contains(strings.ToUpper(node.Description), "INHERITING") {
-				parts := strings.Fields(node.Description)
-				for i, p := range parts {
-					if strings.ToUpper(p) == "FROM" && i+1 < len(parts) {
-						info.Superclass = parts[i+1]
-					}
-				}
-			}
-
-			// Recurse into children
-			for i := range node.Children {
-				extractInfo(&node.Children[i])
-			}
+	for _, elem := range structure.Elements {
+		switch elem.Type {
+		case "CLAS/OM": // method
+			info.Methods = append(info.Methods, elem.Name)
+		case "CLAS/OA": // attribute
+			info.Attributes = append(info.Attributes, elem.Name)
+		case "CLAS/OT": // type
+			// types tracked via interfaces list for now
 		}
-
-		extractInfo(structure)
+		// Interface implementations show up via ClifName
+		if elem.ClifName != "" && elem.ClifName != className {
+			info.Interfaces = append(info.Interfaces, elem.ClifName)
+		}
 	}
 
 	// Check for abstract/final in main source (quick scan)
