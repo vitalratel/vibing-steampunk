@@ -37,7 +37,14 @@ func (s *Server) routeReadAction(ctx context.Context, action, objectType, object
 			if objectName == "" {
 				return newToolResultError("class_name is required"), true, nil
 			}
-			result, err := s.handleGetClass(ctx, newRequest(map[string]any{"class_name": objectName}))
+			args := map[string]any{"class_name": objectName}
+			if method, ok := params["method"].(string); ok && method != "" {
+				args["method"] = method
+			}
+			if include, ok := params["include"].(string); ok && include != "" {
+				args["include"] = include
+			}
+			result, err := s.handleGetClass(ctx, newRequest(args))
 			return result, true, err
 
 		case "FUNC":
@@ -164,6 +171,22 @@ func (s *Server) handleGetClass(ctx context.Context, request mcp.CallToolRequest
 	className, ok := request.Params.Arguments["class_name"].(string)
 	if !ok || className == "" {
 		return newToolResultError("class_name is required"), nil
+	}
+
+	method, _ := request.Params.Arguments["method"].(string)
+	include, _ := request.Params.Arguments["include"].(string)
+
+	// Use method-level or include-level read when specified
+	if method != "" || include != "" {
+		opts := &adt.GetSourceOptions{
+			Method:  method,
+			Include: include,
+		}
+		source, err := s.adtClient.GetSource(ctx, "CLAS", className, opts)
+		if err != nil {
+			return wrapErr("GetClass", err), nil
+		}
+		return mcp.NewToolResultText(source), nil
 	}
 
 	source, err := s.adtClient.GetClassSource(ctx, className)

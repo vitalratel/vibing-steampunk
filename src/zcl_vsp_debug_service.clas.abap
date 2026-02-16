@@ -714,7 +714,20 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
           TRY.
               DATA lo_incl_naming TYPE REF TO if_oo_class_incl_naming.
               lo_incl_naming ?= cl_oo_include_naming=>get_instance_by_name( CONV seoclsname( lv_class ) ).
-              lv_include = lo_incl_naming->get_include_by_mtdname( CONV seocpdname( lv_method ) ).
+              " Use CALL METHOD to catch old-style RAISE internal_method_not_existing
+              DATA lv_mtdname TYPE seocpdname.
+              lv_mtdname = lv_method.
+              CALL METHOD lo_incl_naming->get_include_by_mtdname
+                EXPORTING
+                  mtdname = lv_mtdname
+                RECEIVING
+                  progname = lv_include
+                EXCEPTIONS
+                  internal_method_not_existing = 1
+                  OTHERS                       = 2.
+              IF sy-subrc <> 0.
+                CLEAR lv_include.
+              ENDIF.
             CATCH cx_root INTO DATA(lx_naming).
               " Fall back to no include if resolution fails
               CLEAR lv_include.
@@ -979,7 +992,25 @@ CLASS zcl_vsp_debug_service IMPLEMENTATION.
       TRY.
           DATA lo_incl_naming TYPE REF TO if_oo_class_incl_naming.
           lo_incl_naming ?= cl_oo_include_naming=>get_instance_by_name( CONV seoclsname( lv_class ) ).
-          lv_include = lo_incl_naming->get_include_by_mtdname( CONV seocpdname( lv_method ) ).
+          " Use CALL METHOD to catch old-style RAISE internal_method_not_existing
+          DATA lv_mtdname TYPE seocpdname.
+          lv_mtdname = lv_method.
+          CALL METHOD lo_incl_naming->get_include_by_mtdname
+            EXPORTING
+              mtdname = lv_mtdname
+            RECEIVING
+              progname = lv_include
+            EXCEPTIONS
+              internal_method_not_existing = 1
+              OTHERS                       = 2.
+          IF sy-subrc <> 0.
+            rs_response = zcl_vsp_utils=>build_error(
+              iv_id = is_message-id
+              iv_code = 'RESOLVE_FAILED'
+              iv_message = |Method '{ lv_method }' not found in class '{ lv_class }'|
+            ).
+            RETURN.
+          ENDIF.
           DATA(lv_padded_name) = |{ lv_class WIDTH = 30 PAD = '=' ALIGN = LEFT }|.
           lv_main_program = |{ lv_padded_name }CP|.
         CATCH cx_root INTO DATA(lx_naming).
